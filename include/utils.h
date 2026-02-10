@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sys/time.h>
 #include <map>
+#include <cuda_runtime.h>
 
 class Exception : public std::runtime_error
 {
@@ -269,8 +270,15 @@ namespace iRangeGraph
         int node_id;
         int lbound, rbound;
         int depth;
-        std::vector<TreeNode *> childs;
-        TreeNode(int l, int r, int d) : lbound(l), rbound(r), depth(d) {}
+        TreeNode **childs;      // Raw pointer array
+        int childs_size;        // Number of children
+        int childs_capacity;    // Allocated capacity
+        
+        TreeNode(int l, int r, int d) : lbound(l), rbound(r), depth(d) {
+            childs_size = 0;
+            childs_capacity = 4;
+            cudaMallocManaged(&childs, childs_capacity * sizeof(TreeNode*));
+        }
     };
 
     class SegmentTree
@@ -283,7 +291,11 @@ namespace iRangeGraph
 
         SegmentTree(int data_nb)
         {
-            root = new TreeNode(0, data_nb - 1, 0);
+            // root = new TreeNode(0, data_nb - 1, 0);
+            cudaMallocManaged((void **)&root, sizeof(TreeNode));
+            new (root) TreeNode(0, data_nb - 1, 0);
+             if (root == nullptr)
+                throw std::runtime_error("Not enough memory");
         }
 
         void BuildTree(TreeNode *u)
@@ -308,8 +320,21 @@ namespace iRangeGraph
                     res--;
                 }
                 r = std::min(r, R);
-                TreeNode *childnode = new TreeNode(l, r, u->depth + 1);
-                u->childs.emplace_back(childnode);
+                TreeNode *childnode;
+                cudaMallocManaged((void **)&childnode, sizeof(TreeNode));
+                new (childnode) TreeNode(l, r, u->depth + 1);
+                
+                // Add child to array (with resizing if needed)
+                if (u->childs_size == u->childs_capacity) {
+                    u->childs_capacity *= 2;
+                    TreeNode **new_childs;
+                    cudaMallocManaged(&new_childs, u->childs_capacity * sizeof(TreeNode*));
+                    memcpy(new_childs, u->childs, u->childs_size * sizeof(TreeNode*));
+                    cudaFree(u->childs);
+                    u->childs = new_childs;
+                }
+                u->childs[u->childs_size++] = childnode;
+                
                 BuildTree(childnode);
                 l = r + 1;
             }
@@ -324,9 +349,9 @@ namespace iRangeGraph
                 return res;
             if (u->rbound < ql)
                 return res;
-            for (auto child : u->childs)
+            for (int i = 0; i < u->childs_size; ++i)
             {
-                auto t = range_filter(child, ql, qr);
+                auto t = range_filter(u->childs[i], ql, qr);
                 while (t.size())
                 {
                     res.emplace_back(t.back());
@@ -334,6 +359,46 @@ namespace iRangeGraph
                 }
             }
             return res;
+        }
+        
+        // GPU-compatible range filter - iterative version to avoid stack overflow
+        // Uses manual stack instead of recursion
+        __device__ int range_filter_gpu(TreeNode *root, int ql, int qr, TreeNode **output, int max_nodes)
+        {
+            // Manual stack for iterative tree traversal (max depth ~20 for most trees)
+            TreeNode *stack[50];
+            int stack_top = 0;
+            int output_count = 0;
+            
+            // Start with root
+            stack[stack_top++] = root;
+            
+            // Iterative DFS traversal
+            while (stack_top > 0 && output_count < max_nodes)
+            {
+                // Pop node from stack
+                TreeNode *current = stack[--stack_top];
+                
+                if (current == nullptr) continue;
+                
+                // If this node is completely within range, add it and skip children
+                if (current->lbound >= ql && current->rbound <= qr)
+                {
+                    output[output_count++] = current;
+                    continue;
+                }
+                
+                // If no overlap, skip this node
+                if (current->lbound > qr || current->rbound < ql)
+                    continue;
+                
+                // Partial overlap - push children onto stack
+                for (int i = 0; i < current->childs_size && stack_top < 50; ++i)
+                {
+                    stack[stack_top++] = current->childs[i];
+                }
+            }
+            return output_count;
         }
     };
 }

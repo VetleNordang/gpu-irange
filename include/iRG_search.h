@@ -5,6 +5,7 @@
 #include "searcher.hpp"
 #include "memory.hpp"
 #include <bitset>
+#include <cuda_runtime.h>
 
 namespace iRangeGraph
 {
@@ -49,7 +50,8 @@ namespace iRangeGraph
             vectorfile.read((char *)&max_elements_, sizeof(int));
             vectorfile.read((char *)&dim_, sizeof(int));
 
-            tree = new SegmentTree(max_elements_);
+            cudaMallocManaged((void**)&tree, sizeof(SegmentTree));
+            new (tree) SegmentTree(max_elements_);
             tree->BuildTree(tree->root);
 
             space = new hnswlib::L2Space(dim_);
@@ -64,7 +66,8 @@ namespace iRangeGraph
             offsetData_ = size_links_per_element_;
             prefetch_lines = data_size_ >> 4;
 
-            data_memory_ = (char *)memory::align_mm<1 << 21>(max_elements_ * size_data_per_element_);
+            // data_memory_ = (char *)memory::align_mm<1 << 21>(max_elements_ * size_data_per_element_);
+            cudaMallocManaged((void **)&data_memory_, max_elements_ * size_data_per_element_);
             if (data_memory_ == nullptr)
                 throw std::runtime_error("Not enough memory");
 
@@ -96,9 +99,11 @@ namespace iRangeGraph
 
         ~iRangeGraph_Search()
         {
-            free(data_memory_);
+            cudaFree(data_memory_);
             data_memory_ = nullptr;
         }
+
+        __device__ float L2Distance(const float *a, const float *b, size_t dim);
 
         inline char *getDataByInternalId(tableint internal_id) const
         {
@@ -134,11 +139,11 @@ namespace iRangeGraph
                 do
                 {
                     contain = false;
-                    if (cur_node->childs.size() == 0)
+                    if (cur_node->childs_size == 0)
                         nxt_node = nullptr;
                     else
                     {
-                        for (int i = 0; i < cur_node->childs.size(); ++i)
+                        for (int i = 0; i < cur_node->childs_size; ++i)
                         {
                             if (cur_node->childs[i]->lbound <= pid && cur_node->childs[i]->rbound >= pid)
                             {
@@ -259,10 +264,11 @@ namespace iRangeGraph
                 if (!outfile.is_open())
                     throw Exception("cannot open " + savepath);
 
-                std::vector<int> HOP;
-                std::vector<int> DCO;
-                std::vector<float> QPS;
-                std::vector<float> RECALL;
+                // Performance metrics for different ef values
+                std::vector<int> HOP;      // Average hops per query
+                std::vector<int> DCO;      // Average distance computations per query
+                std::vector<float> QPS;    // Queries per second
+                std::vector<float> RECALL; // Recall accuracy
 
                 std::cout << "suffix = " << suffix << std::endl;
                 for (auto ef : SearchEF)

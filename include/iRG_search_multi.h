@@ -164,11 +164,11 @@ namespace iRangeGraph_multi
                 do
                 {
                     contain = false;
-                    if (cur_node->childs.size() == 0)
+                    if (cur_node->childs_size == 0)
                         nxt_node = nullptr;
                     else
                     {
-                        for (int i = 0; i < cur_node->childs.size(); i++)
+                        for (int i = 0; i < cur_node->childs_size; i++)
                         {
                             if (cur_node->childs[i]->lbound <= pid && cur_node->childs[i]->rbound >= pid)
                             {
