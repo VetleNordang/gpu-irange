@@ -140,13 +140,6 @@ void search_on_gpu(iRangeGraph::DataLoader &storage, iRangeGraph::SegmentTree *t
             total_hops += d_hops[i];
             total_dist_comps += d_dist_comps[i];
             
-            // Debug disabled - uncomment if needed for troubleshooting
-            /*
-            if (i == 0) {
-                // Debug code commented out
-            }
-            */
-            
             // Check recall
             std::map<int, int> record;
             for (int k = 0; k < K; k++) {
@@ -200,18 +193,13 @@ void search_on_gpu(iRangeGraph::DataLoader &storage, iRangeGraph::SegmentTree *t
 }
 
 int main(int argc, char **argv) {
-    // Print GPU information at startup
-    printf("\n╔════════════════════════════════════════╗\n");
-    printf("║   GPU-Accelerated iRangeGraph Search   ║\n");
-    printf("╚════════════════════════════════════════╝\n\n");
-    
     int deviceCount;
     cudaGetDeviceCount(&deviceCount);
     printf("CUDA Device Info:\n");
     printf("  Number of CUDA devices: %d\n", deviceCount);
     
     if (deviceCount == 0) {
-        printf("  ❌ ERROR: No CUDA devices found!\n");
+        printf("ERROR: No CUDA devices found!\n");
         return -1;
     }
     
