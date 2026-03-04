@@ -6,6 +6,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     cmake \
     ninja-build \
     gdb \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 
