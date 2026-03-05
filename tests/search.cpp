@@ -61,7 +61,7 @@ int main(int argc, char **argv)
     storage.query_K = query_K;
     storage.LoadQuery(paths["query_vector"]);
     // If it is the first run, Generate shall be called; otherwise, Generate can be skipped
-    // Generate(storage);
+    Generate(storage);
     storage.LoadQueryRange(paths["range_saveprefix"]);
     storage.LoadGroundtruth(paths["groundtruth_saveprefix"]);
 

@@ -9,6 +9,7 @@
 #include <sys/time.h>
 #include <map>
 #include <cuda_runtime.h>
+#include <omp.h>
 
 class Exception : public std::runtime_error
 {
@@ -231,6 +232,8 @@ namespace iRangeGraph
         void GenerateGroundtruth(std::string saveprefix, DataLoader &storage)
         {
             space = new hnswlib::L2Space(storage.Dim);
+
+            // Process each suffix (suffixes are independent, can be parallel)
             for (auto t : storage.query_range)
             {
                 int suffix = t.first;
@@ -239,12 +242,20 @@ namespace iRangeGraph
                 std::ofstream outfile(savepath, std::ios::out | std::ios::binary);
                 if (!outfile.is_open())
                     throw Exception("cannot open " + savepath);
-                std::cout << "generating for " << t.first << std::endl;
+                std::cout << "generating for " << suffix << std::endl;
+
+                // Buffer to store all results before writing (avoid file write race condition)
+                std::vector<std::vector<int>> all_results(query_nb);
+                
+                // Parallelize over queries (each query independent)
+                # pragma omp parallel for num_threads(32)
                 for (int i = 0; i < query_nb; i++)
                 {
                     auto rp = t.second[i];
                     int ql = rp.first, qr = rp.second;
                     std::priority_queue<std::pair<float, int>> ans;
+                    
+                    // Compute distances for this query
                     for (int j = ql; j <= qr; j++)
                     {
                         float dis = dis_compute(storage.query_points[i], storage.data_points[j]);
@@ -252,10 +263,21 @@ namespace iRangeGraph
                         if (ans.size() > storage.query_K)
                             ans.pop();
                     }
+                    
+                    // Store results in thread-local buffer (no race condition)
+                    all_results[i].reserve(storage.query_K);
                     while (ans.size())
                     {
-                        auto id = ans.top().second;
+                        all_results[i].push_back(ans.top().second);
                         ans.pop();
+                    }
+                }
+                
+                // Write all results sequentially (no race condition)
+                for (int i = 0; i < query_nb; i++)
+                {
+                    for (int id : all_results[i])
+                    {
                         outfile.write((char *)&id, sizeof(int));
                     }
                 }
@@ -270,15 +292,8 @@ namespace iRangeGraph
         int node_id;
         int lbound, rbound;
         int depth;
-        TreeNode **childs;      // Raw pointer array
-        int childs_size;        // Number of children
-        int childs_capacity;    // Allocated capacity
-        
-        TreeNode(int l, int r, int d) : lbound(l), rbound(r), depth(d) {
-            childs_size = 0;
-            childs_capacity = 4;
-            cudaMallocManaged(&childs, childs_capacity * sizeof(TreeNode*));
-        }
+        std::vector<TreeNode *> childs;
+        TreeNode(int l, int r, int d) : lbound(l), rbound(r), depth(d) {}
     };
 
     class SegmentTree
@@ -291,11 +306,7 @@ namespace iRangeGraph
 
         SegmentTree(int data_nb)
         {
-            // root = new TreeNode(0, data_nb - 1, 0);
-            cudaMallocManaged((void **)&root, sizeof(TreeNode));
-            new (root) TreeNode(0, data_nb - 1, 0);
-             if (root == nullptr)
-                throw std::runtime_error("Not enough memory");
+            root = new TreeNode(0, data_nb - 1, 0);
         }
 
         void BuildTree(TreeNode *u)
@@ -320,20 +331,8 @@ namespace iRangeGraph
                     res--;
                 }
                 r = std::min(r, R);
-                TreeNode *childnode;
-                cudaMallocManaged((void **)&childnode, sizeof(TreeNode));
-                new (childnode) TreeNode(l, r, u->depth + 1);
-                
-                // Add child to array (with resizing if needed)
-                if (u->childs_size == u->childs_capacity) {
-                    u->childs_capacity *= 2;
-                    TreeNode **new_childs;
-                    cudaMallocManaged(&new_childs, u->childs_capacity * sizeof(TreeNode*));
-                    memcpy(new_childs, u->childs, u->childs_size * sizeof(TreeNode*));
-                    cudaFree(u->childs);
-                    u->childs = new_childs;
-                }
-                u->childs[u->childs_size++] = childnode;
+                TreeNode *childnode = new TreeNode(l, r, u->depth + 1);
+                u->childs.emplace_back(childnode);
                 
                 BuildTree(childnode);
                 l = r + 1;
@@ -349,7 +348,7 @@ namespace iRangeGraph
                 return res;
             if (u->rbound < ql)
                 return res;
-            for (int i = 0; i < u->childs_size; ++i)
+            for (int i = 0; i < u->childs.size(); ++i)
             {
                 auto t = range_filter(u->childs[i], ql, qr);
                 while (t.size())
@@ -393,7 +392,7 @@ namespace iRangeGraph
                     continue;
                 
                 // Partial overlap - push children onto stack
-                for (int i = 0; i < current->childs_size && stack_top < 50; ++i)
+                for (int i = 0; i < current->childs.size() && stack_top < 50; ++i)
                 {
                     stack[stack_top++] = current->childs[i];
                 }

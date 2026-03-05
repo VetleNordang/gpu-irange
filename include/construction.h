@@ -185,7 +185,7 @@ namespace iRangeGraph
 
         void process_node(TreeNode *u)
         {
-            if (u->childs_size == 0)
+            if (u->childs.size() == 0)
                 return;
 
             copyfirstchild(u);
@@ -193,7 +193,7 @@ namespace iRangeGraph
             unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
             std::default_random_engine e(seed);
 
-            for (int i = 1; i < u->childs_size; i++)
+            for (int i = 1; i < u->childs.size(); i++)
             {
                 std::uniform_int_distribution<int> u_start(0, merged_point_num - 1);
                 TreeNode *cur_child = u->childs[i];

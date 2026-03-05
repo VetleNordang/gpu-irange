@@ -6,6 +6,7 @@
 #include "memory.hpp"
 #include <bitset>
 #include <cuda_runtime.h>
+#include <omp.h>
 
 namespace iRangeGraph
 {
@@ -50,8 +51,7 @@ namespace iRangeGraph
             vectorfile.read((char *)&max_elements_, sizeof(int));
             vectorfile.read((char *)&dim_, sizeof(int));
 
-            cudaMallocManaged((void**)&tree, sizeof(SegmentTree));
-            new (tree) SegmentTree(max_elements_);
+            tree = new SegmentTree(max_elements_);
             tree->BuildTree(tree->root);
 
             space = new hnswlib::L2Space(dim_);
@@ -66,8 +66,7 @@ namespace iRangeGraph
             offsetData_ = size_links_per_element_;
             prefetch_lines = data_size_ >> 4;
 
-            // data_memory_ = (char *)memory::align_mm<1 << 21>(max_elements_ * size_data_per_element_);
-            cudaMallocManaged((void **)&data_memory_, max_elements_ * size_data_per_element_);
+            data_memory_ = (char *)memory::align_mm<1 << 21>(max_elements_ * size_data_per_element_);
             if (data_memory_ == nullptr)
                 throw std::runtime_error("Not enough memory");
 
@@ -99,7 +98,7 @@ namespace iRangeGraph
 
         ~iRangeGraph_Search()
         {
-            cudaFree(data_memory_);
+            free(data_memory_);
             data_memory_ = nullptr;
         }
 
@@ -139,11 +138,11 @@ namespace iRangeGraph
                 do
                 {
                     contain = false;
-                    if (cur_node->childs_size == 0)
+                    if (cur_node->childs.size() == 0)
                         nxt_node = nullptr;
                     else
                     {
-                        for (int i = 0; i < cur_node->childs_size; ++i)
+                        for (int i = 0; i < cur_node->childs.size(); ++i)
                         {
                             if (cur_node->childs[i]->lbound <= pid && cur_node->childs[i]->rbound >= pid)
                             {
@@ -208,6 +207,8 @@ namespace iRangeGraph
             while (!candidate_set.empty())
             {
                 auto current_point_pair = candidate_set.top();
+
+                #pragma omp atomic
                 ++metric_hops;
                 if (current_point_pair.first > lowerBound)
                 {
@@ -230,6 +231,8 @@ namespace iRangeGraph
                     visited_set.set(neighbor_id);
                     char *neighbor_data = getDataByInternalId(neighbor_id);
                     float dis = fstdistfunc_(query_data, neighbor_data, dist_func_param_);
+                    
+                    #pragma omp atomic
                     ++metric_distance_computations;
 
                     if (top_candidates.size() < ef)
@@ -274,23 +277,23 @@ namespace iRangeGraph
                 for (auto ef : SearchEF)
                 {
                     int tp = 0;
-                    float searchtime = 0;
 
                     metric_hops = 0;
-                    metric_distance_computations = 0;
-
+                    metric_distance_computations = 0;                    
+                    // Measure wall-clock time (not cumulative thread time)
+                    timeval t1, t2;
+                    gettimeofday(&t1, NULL);
+                    
+                    # pragma omp parallel for reduction(+:tp) num_threads(32)
+                    
                     for (int i = 0; i < storage->query_nb; i++)
                     {
                         auto rp = range.second[i];
                         int ql = rp.first, qr = rp.second;
 
-                        timeval t1, t2;
-                        gettimeofday(&t1, NULL);
                         std::vector<TreeNode *> filterednodes = tree->range_filter(tree->root, ql, qr);
                         std::priority_queue<PFI> res = TopDown_nodeentries_search(filterednodes, storage->query_points[i].data(), ef, storage->query_K, ql, qr, edge_limit);
-                        gettimeofday(&t2, NULL);
-                        auto duration = GetTime(t1, t2);
-                        searchtime += duration;
+                        
                         std::map<int, int> record;
                         while (res.size())
                         {
@@ -303,6 +306,9 @@ namespace iRangeGraph
                                 tp++;
                         }
                     }
+                    
+                    gettimeofday(&t2, NULL);
+                    float searchtime = GetTime(t1, t2);
 
                     float recall = 1.0 * tp / storage->query_nb / storage->query_K;
                     float qps = storage->query_nb / searchtime;
@@ -314,7 +320,6 @@ namespace iRangeGraph
                     QPS.emplace_back(qps);
                     RECALL.emplace_back(recall);
                 }
-
                 for (int i = 0; i < RECALL.size(); i++)
                 {
                     outfile << SearchEF[i] << "," << RECALL[i] << "," << QPS[i] << "," << DCO[i] << "," << HOP[i] << std::endl;
