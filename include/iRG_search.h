@@ -285,7 +285,7 @@ namespace iRangeGraph
                     gettimeofday(&t1, NULL);
                     
                     # pragma omp parallel for reduction(+:tp) num_threads(32)
-                    
+
                     for (int i = 0; i < storage->query_nb; i++)
                     {
                         auto rp = range.second[i];

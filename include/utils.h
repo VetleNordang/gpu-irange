@@ -8,8 +8,10 @@
 #include <fstream>
 #include <sys/time.h>
 #include <map>
+#include <queue>
 #include <cuda_runtime.h>
 #include <omp.h>
+#include "../cude_version/gpu_index.cuh"
 
 class Exception : public std::runtime_error
 {
@@ -292,7 +294,9 @@ namespace iRangeGraph
         int node_id;
         int lbound, rbound;
         int depth;
-        std::vector<TreeNode *> childs;
+        std::vector<TreeNode *> childs;  // CPU version
+        
+        
         TreeNode(int l, int r, int d) : lbound(l), rbound(r), depth(d) {}
     };
 
@@ -336,7 +340,7 @@ namespace iRangeGraph
                 
                 BuildTree(childnode);
                 l = r + 1;
-            }
+            }            
         }
 
         std::vector<TreeNode *> range_filter(TreeNode *u, int ql, int qr)
@@ -359,45 +363,117 @@ namespace iRangeGraph
             }
             return res;
         }
-        
-        // GPU-compatible range filter - iterative version to avoid stack overflow
-        // Uses manual stack instead of recursion
-        __device__ int range_filter_gpu(TreeNode *root, int ql, int qr, TreeNode **output, int max_nodes)
-        {
-            // Manual stack for iterative tree traversal (max depth ~20 for most trees)
-            TreeNode *stack[50];
-            int stack_top = 0;
-            int output_count = 0;
+
+        std::vector<TreeNode *> FlattenTree() {
+            std::vector<TreeNode *> flat;
+            std::queue<TreeNode *> q;
+            q.push(root);
             
-            // Start with root
-            stack[stack_top++] = root;
-            
-            // Iterative DFS traversal
-            while (stack_top > 0 && output_count < max_nodes)
-            {
-                // Pop node from stack
-                TreeNode *current = stack[--stack_top];
+            while (!q.empty()) {
+                TreeNode *node = q.front();
+                q.pop();
+                flat.push_back(node);
                 
-                if (current == nullptr) continue;
-                
-                // If this node is completely within range, add it and skip children
-                if (current->lbound >= ql && current->rbound <= qr)
-                {
-                    output[output_count++] = current;
-                    continue;
-                }
-                
-                // If no overlap, skip this node
-                if (current->lbound > qr || current->rbound < ql)
-                    continue;
-                
-                // Partial overlap - push children onto stack
-                for (int i = 0; i < current->childs.size() && stack_top < 50; ++i)
-                {
-                    stack[stack_top++] = current->childs[i];
+                for (auto child : node->childs) {
+                    q.push(child);
                 }
             }
-            return output_count;
+            return flat;
         }
+        
+        std::vector<GPUNode> FlattenGPUTree() {
+            std::vector<GPUNode> gpu_nodes;
+            std::vector<iRangeGraph::TreeNode*> node_order;
+            std::map<iRangeGraph::TreeNode*, int> node_to_index;
+            
+            // First pass: BFS traversal to get all nodes in order
+            std::queue<iRangeGraph::TreeNode*> q;
+            q.push(root);
+            
+            while (!q.empty()) {
+                iRangeGraph::TreeNode* node = q.front();
+                q.pop();
+                
+                // Store the node and its index mapping
+                int current_index = node_order.size();
+                node_order.push_back(node);
+                node_to_index[node] = current_index;
+                
+                // Add children to queue
+                for (auto child : node->childs) {
+                    q.push(child);
+                }
+            }
+            
+            // Second pass: Create GPU nodes with correct child indices
+            for (size_t i = 0; i < node_order.size(); ++i) {
+                iRangeGraph::TreeNode* node = node_order[i];
+                
+                GPUNode gpu_node;
+                gpu_node.lbound = node->lbound;
+                gpu_node.rbound = node->rbound;
+                gpu_node.depth = node->depth;
+                gpu_node.node_id = node->node_id;
+                gpu_node.is_leaf = (node->childs.size() == 0);
+                
+                // Set child indices using the map (handle variable number of children)
+                if (node->childs.size() >= 1) {
+                    gpu_node.left_child_index = node_to_index[node->childs[0]];
+                } else {
+                    gpu_node.left_child_index = -1;
+                }
+                
+                if (node->childs.size() >= 2) {
+                    gpu_node.right_child_index = node_to_index[node->childs[1]];
+                } else {
+                    gpu_node.right_child_index = -1;
+                }
+                
+                gpu_nodes.push_back(gpu_node);
+            }
+            
+            return gpu_nodes;
+        }
+
+        // GPU-compatible range filter - iterative version to avoid stack overflow
+        // Uses manual stack instead of recursion
+        //     __device__ int range_filter_gpu(TreeNode *root, int ql, int qr, TreeNode **output, int max_nodes)
+        //     {
+        //         // Manual stack for iterative tree traversal (max depth ~20 for most trees)
+        //         TreeNode *stack[50];
+        //         int stack_top = 0;
+        //         int output_count = 0;
+                
+        //         // Start with root
+        //         stack[stack_top++] = root;
+                
+        //         // Iterative DFS traversal
+        //         while (stack_top > 0 && output_count < max_nodes)
+        //         {
+        //             // Pop node from stack
+        //             TreeNode *current = stack[--stack_top];
+                    
+        //             if (current == nullptr) continue;
+                    
+        //             // If this node is completely within range, add it and skip children
+        //             if (current->lbound >= ql && current->rbound <= qr)
+        //             {
+        //                 output[output_count++] = current;
+        //                 continue;
+        //             }
+                    
+        //             // If no overlap, skip this node
+        //             if (current->lbound > qr || current->rbound < ql)
+        //                 continue;
+                    
+        //             // Partial overlap - push children onto stack
+        //             // Use GPU-compatible fields (childs_size instead of childs.size())
+        //             for (int i = 0; i < current->childs_size && stack_top < 50; ++i)
+        //             {
+        //                 stack[stack_top++] = current->childs_gpu[i];
+        //             }
+        //         }
+        //         return output_count;
+        //     }
     };
 }

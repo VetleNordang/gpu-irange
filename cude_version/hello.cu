@@ -4,8 +4,15 @@
 #include <stdio.h>
 #include <cassert>
 #include <iostream>
+#include <fstream>
+#include <algorithm>
+#include <chrono>
 #include "iRG_search.h"
 #include <curand_kernel.h>
+#include "gpu_index.cuh"
+#include "gpu_heap.cuh"
+#include "gpu_visited.cuh"
+#include "gpu_search_updated.cuh"
 
 
 const int query_K = 10;
@@ -14,166 +21,31 @@ int M;
 using std::cout;
 std::unordered_map<std::string, std::string> paths;
 
-// ============ GPU Heap Structures ============
-
-// Pair structure for heap elements
-struct HeapNode {
-    float dist;
-    int id;
-};
-
-// Min-heap (smallest distance at top) - for candidate_set
-struct MinHeap {
-    HeapNode* data;
-    int size;
-    int capacity;
+// Test kernel to demonstrate visited array
+__global__ void test_visited_array(GPUVisitedArray visited) {
+    int query_id = threadIdx.x;  // Each thread is a different query
     
-    __device__ void init(HeapNode* buffer, int cap) {
-        data = buffer;
-        size = 0;
-        capacity = cap;
-    }
-    
-    __device__ void heapify_up(int idx) {
-        while (idx > 0) {
-            int parent = (idx - 1) / 2;
-            if (data[idx].dist < data[parent].dist) {
-                HeapNode tmp = data[idx];
-                data[idx] = data[parent];
-                data[parent] = tmp;
-                idx = parent;
-            } else {
-                break;
-            }
-        }
-    }
-    
-    __device__ void heapify_down(int idx) {
-        while (true) {
-            int smallest = idx;
-            int left = 2 * idx + 1;
-            int right = 2 * idx + 2;
+    if (query_id < visited.num_queries) {
+        printf("\n=== Query %d Testing Visited Array ===\n", query_id);
+        
+        // Simulate visiting some nodes
+        int nodes_to_visit[] = {10, 25, 50, 100, 10};  // Note: 10 appears twice!
+        
+        for (int i = 0; i < 5; i++) {
+            int node = nodes_to_visit[i];
             
-            if (left < size && data[left].dist < data[smallest].dist)
-                smallest = left;
-            if (right < size && data[right].dist < data[smallest].dist)
-                smallest = right;
-                
-            if (smallest != idx) {
-                HeapNode tmp = data[idx];
-                data[idx] = data[smallest];
-                data[smallest] = tmp;
-                idx = smallest;
+            // Check if already visited
+            if (isVisited(visited, query_id, node)) {
+                printf("  Node %d: Already visited! (skipping)\n", node);
             } else {
-                break;
+                printf("  Node %d: First time visiting (marking as visited)\n", node);
+                markVisited(visited, query_id, node);
             }
         }
+        
+        printf("=== Query %d Complete ===\n", query_id);
     }
-    
-    __device__ void push(float dist, int id) {
-        if (size < capacity) {
-            data[size].dist = dist;
-            data[size].id = id;
-            heapify_up(size);
-            size++;
-        }
-    }
-    
-    __device__ HeapNode top() {
-        return data[0];
-    }
-    
-    __device__ void pop() {
-        if (size > 0) {
-            data[0] = data[size - 1];
-            size--;
-            heapify_down(0);
-        }
-    }
-    
-    __device__ bool empty() {
-        return size == 0;
-    }
-};
-
-// Max-heap (largest distance at top) - for top_candidates
-struct MaxHeap {
-    HeapNode* data;
-    int size;
-    int capacity;
-    
-    __device__ void init(HeapNode* buffer, int cap) {
-        data = buffer;
-        size = 0;
-        capacity = cap;
-    }
-    
-    __device__ void heapify_up(int idx) {
-        while (idx > 0) {
-            int parent = (idx - 1) / 2;
-            if (data[idx].dist > data[parent].dist) {
-                HeapNode tmp = data[idx];
-                data[idx] = data[parent];
-                data[parent] = tmp;
-                idx = parent;
-            } else {
-                break;
-            }
-        }
-    }
-    
-    __device__ void heapify_down(int idx) {
-        while (true) {
-            int largest = idx;
-            int left = 2 * idx + 1;
-            int right = 2 * idx + 2;
-            
-            if (left < size && data[left].dist > data[largest].dist)
-                largest = left;
-            if (right < size && data[right].dist > data[largest].dist)
-                largest = right;
-                
-            if (largest != idx) {
-                HeapNode tmp = data[idx];
-                data[idx] = data[largest];
-                data[largest] = tmp;
-                idx = largest;
-            } else {
-                break;
-            }
-        }
-    }
-    
-    __device__ void push(float dist, int id) {
-        if (size < capacity) {
-            data[size].dist = dist;
-            data[size].id = id;
-            heapify_up(size);
-            size++;
-        } else if (dist < data[0].dist) {
-            // Replace worst element
-            data[0].dist = dist;
-            data[0].id = id;
-            heapify_down(0);
-        }
-    }
-    
-    __device__ HeapNode top() {
-        return data[0];
-    }
-    
-    __device__ void pop() {
-        if (size > 0) {
-            data[0] = data[size - 1];
-            size--;
-            heapify_down(0);
-        }
-    }
-    
-    __device__ bool empty() {
-        return size == 0;
-    }
-};
+}
 
 // Random number generation
 __device__ unsigned int hash_random(unsigned int x) {
@@ -216,213 +88,365 @@ void Generate(iRangeGraph::DataLoader &storage)
     generator.GenerateGroundtruth(paths["groundtruth_saveprefix"], storage);
 }
 
-// Test kernel for heap operations
-__global__ void test_heaps_kernel() {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+ 
+
+void load_index_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &gpu_index) {
+    int dimension = index.storage->Dim;
+    int data_points = index.max_elements_;
+    size_t total_index_memory = (size_t)data_points * index.size_data_per_element_;
     
-    if (tid == 0) {  // Only thread 0 runs the test
-        printf("=== Testing Heaps ===\n");
-        
-        // Test MinHeap
-        HeapNode min_buffer[10];
-        MinHeap min_heap;
-        min_heap.init(min_buffer, 10);
-        
-        printf("\n--- MinHeap Test (smallest on top) ---\n");
-        printf("Inserting: 5.0, 2.0, 8.0, 1.0, 9.0, 3.0\n");
-        min_heap.push(5.0, 100);
-        min_heap.push(2.0, 101);
-        min_heap.push(8.0, 102);
-        min_heap.push(1.0, 103);
-        min_heap.push(9.0, 104);
-        min_heap.push(3.0, 105);
-        
-        printf("Popping in order:\n");
-        while (!min_heap.empty()) {
-            HeapNode node = min_heap.top();
-            printf("  dist=%.1f, id=%d\n", node.dist, node.id);
-            min_heap.pop();
-        }
-        
-        // Test MaxHeap
-        HeapNode max_buffer[5];
-        MaxHeap max_heap;
-        max_heap.init(max_buffer, 5);
-        
-        printf("\n--- MaxHeap Test (largest on top, capacity=5) ---\n");
-        printf("Inserting: 5.0, 2.0, 8.0, 1.0, 9.0, 3.0, 0.5\n");
-        max_heap.push(5.0, 200);
-        max_heap.push(2.0, 201);
-        max_heap.push(8.0, 202);
-        max_heap.push(1.0, 203);
-        max_heap.push(9.0, 204);
-        printf("After 5 insertions (heap full), top=%.1f\n", max_heap.top().dist);
-        
-        max_heap.push(3.0, 205);  // Should replace 9.0
-        printf("After inserting 3.0 (should replace 9.0), top=%.1f\n", max_heap.top().dist);
-        
-        max_heap.push(0.5, 206);  // Should replace 8.0
-        printf("After inserting 0.5 (should replace 8.0), top=%.1f\n", max_heap.top().dist);
-        
-        printf("Final heap contents (largest to smallest):\n");
-        while (!max_heap.empty()) {
-            HeapNode node = max_heap.top();
-            printf("  dist=%.1f, id=%d\n", node.dist, node.id);
-            max_heap.pop();
-        }
-        
-        printf("\n=== Heap Tests Complete ===\n");
+    // Set metadata
+    gpu_index.d_dim = dimension;
+    gpu_index.d_size_data_per_element = index.size_data_per_element_;
+    gpu_index.d_size_links_per_element = index.size_links_per_element_;
+    gpu_index.d_offsetData = index.offsetData_;
+    
+    // Allocate GPU memory for entire index structure
+    cudaError_t err = cudaMalloc((void**)&gpu_index.d_data_memory, total_index_memory);
+    if (err != cudaSuccess) {
+        printf("CudaMalloc failed: %s\n", cudaGetErrorString(err));
+        return;
     }
+    
+    // Copy entire index structure from CPU to GPU
+    err = cudaMemcpy(gpu_index.d_data_memory, index.data_memory_, total_index_memory, cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        printf("CudaMemcpy failed: %s\n", cudaGetErrorString(err));
+        cudaFree(gpu_index.d_data_memory);
+        return;
+    }
+    printf("✓ Copied %.2f GB from CPU to GPU\n", 
+            total_index_memory / (1024.0*1024.0*1024.0));
 }
 
-void test_heaps() {
-    printf("Running heap tests...\n");
-    test_heaps_kernel<<<1, 1>>>();
+void load_segment_tree_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &gpu_index) {
+    iRangeGraph::SegmentTree *tree = index.tree;
+    std::vector<GPUNode> gpu_nodes = tree->FlattenGPUTree();
+    
+    int mem_to_allocate_to_gpu = gpu_nodes.size() * sizeof(GPUNode);
+
+    // Initialize segment tree structure
+    gpu_index.d_segment_tree.num_nodes = gpu_nodes.size();
+    gpu_index.d_segment_tree.max_depth = tree->max_depth;
+    gpu_index.d_segment_tree.root = gpu_nodes[0];
+    
+    // Allocate GPU memory for nodes
+    cudaError_t err = cudaMalloc((void**)&gpu_index.d_segment_tree.d_nodes, mem_to_allocate_to_gpu);
+    if (err != cudaSuccess) {
+        printf("CudaMalloc failed for segment tree: %s\n", cudaGetErrorString(err));
+        return;
+    }
+
+    // Copy nodes to GPU
+    err = cudaMemcpy(gpu_index.d_segment_tree.d_nodes, gpu_nodes.data(), mem_to_allocate_to_gpu, cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        printf("CudaMemcpy failed for segment tree: %s\n", cudaGetErrorString(err));
+        cudaFree(gpu_index.d_segment_tree.d_nodes);
+        return;
+    }
+    
+    printf("✓ Copied %zu nodes (%.2f KB) to GPU\n", 
+           gpu_index.d_segment_tree.num_nodes, mem_to_allocate_to_gpu / 1024.0);
+    
+    // Run test kernel to verify tree structure
     cudaDeviceSynchronize();
     
-    cudaError_t err = cudaGetLastError();
+    err = cudaGetLastError();
     if (err != cudaSuccess) {
         printf("Test kernel error: %s\n", cudaGetErrorString(err));
     }
 }
 
-// GPU kernel to loop over query ranges
-// Each thread processes one query
-__global__ void search_gpu(int *range_data, int num_ranges, int query_nb, int SearchEF, int edge_limit, 
-                          iRangeGraph::SegmentTree *tree, char* visited_arrays, int max_elements) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+void load_queries_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &gpu_index) {
+    int query_nb = index.storage->query_nb;
+    int dim = index.storage->Dim;
     
-    // Each thread handles one query
-    if (tid < query_nb) {
-        // range_data is flattened: [ql0, qr0, ql1, qr1, ...]
-        int ql = range_data[tid * 2];
-        int qr = range_data[tid * 2 + 1];
-        
-        // Allocate temporary array for filtered nodes (max 100 nodes per query)
-        iRangeGraph::TreeNode *filtered_nodes[100];
-        int num_filtered = tree->range_filter_gpu(tree->root, ql, qr, filtered_nodes, 100);
-        
-        if (num_filtered == 0) {
-            printf("Thread %d: No filtered nodes found\n", tid);
-            return;
-        }
-        
-        // Get this thread's visited array
-        char* visited = visited_arrays + (long long)tid * max_elements;
-        
-        // Initialize visited array
-        for (int i = 0; i < max_elements; i++) {
-            visited[i] = 0;
-        }
-        
-        // Allocate heap buffers (local arrays)
-        HeapNode candidate_buffer[500];  // testing with fixed size, can be adjusted 500 the testing value for SearchEF
-        HeapNode top_buffer[500];
-        
-        MinHeap candidate_set;
-        MaxHeap top_candidates;
-        
-        candidate_set.init(candidate_buffer, SearchEF);
-        top_candidates.init(top_buffer, SearchEF);
-        
-        // Select random entry points from filtered nodes
-        for (int i = 0; i < num_filtered; i++) {
-            iRangeGraph::TreeNode *u = filtered_nodes[i];
-            
-            // Generate random entry point
-            unsigned int seed = tid * 1000 + i + clock();
-            int pid = random_in_range(seed, u->lbound, u->rbound);
-            
-            visited[pid] = 1;
-            
-            // TODO: Compute distance (need to implement L2Distance on GPU)
-            // For now, use dummy distance
-            float dist = 0.0f;  // Placeholder
-            
-            candidate_set.push(dist, pid);
-            top_candidates.push(dist, pid);
-        }
-        
-        float lowerBound = top_candidates.empty() ? 1e10f : top_candidates.top().dist;
-        int hops = 0;
-        
-        // Main search loop
-        while (!candidate_set.empty()) {
-            HeapNode current = candidate_set.top();
-            hops++;
-            
-            if (current.dist > lowerBound) {
-                break;
-            }
-            
-            candidate_set.pop();
-            int current_pid = current.id;
-            
-            // TODO: Implement SelectEdge on GPU
-            // For now, just print progress
-            
-            if (hops > SearchEF * 10) {  // Safety limit
-                break;
-            }
-        }
-        
-        printf("Thread %d: range [%d, %d], found %d filtered nodes, performed %d hops\n", 
-               tid, ql, qr, num_filtered, hops);
+    // Allocate GPU memory for query vectors
+    size_t query_vectors_size = (size_t)query_nb * dim * sizeof(float);
+    cudaError_t err = cudaMalloc((void**)&gpu_index.d_query_vectors, query_vectors_size);
+    if (err != cudaSuccess) {
+        printf("CudaMalloc failed for query vectors: %s\n", cudaGetErrorString(err));
+        return;
     }
+    
+    float *flatten_queries = new float[query_nb * dim];
+    for (int i = 0; i < query_nb; i++) {
+        for (int d = 0; d < dim; d++) {
+            flatten_queries[i * dim + d] = index.storage->query_points[i][d];
+        }
+    }
+
+    // Copy query vectors to GPU
+    err = cudaMemcpy(gpu_index.d_query_vectors, flatten_queries, query_vectors_size, cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        printf("CudaMemcpy failed for query vectors: %s\n", cudaGetErrorString(err));
+        cudaFree(gpu_index.d_query_vectors);
+        delete[] flatten_queries;
+        return;
+    }
+    
+    // Allocate GPU memory for query ranges
+    // query_range has keys: 0-9 and 17 (11 total suffixes)
+    std::vector<int> suffixes = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 17};
+    size_t query_ranges_size = (size_t)query_nb * 2 * sizeof(int) * suffixes.size();
+    err = cudaMalloc((void**)&gpu_index.d_query_range, query_ranges_size);
+    if (err != cudaSuccess) {
+        printf("CudaMalloc failed for query ranges: %s\n", cudaGetErrorString(err));
+        delete[] flatten_queries;
+        return;
+    }
+    
+    int *flatten_ranges = new int[query_nb * 2 * suffixes.size()];
+    for (int i = 0; i < query_nb; i++) {
+        for (size_t s = 0; s < suffixes.size(); s++) {
+            int suffix = suffixes[s];
+            flatten_ranges[i * 2 * suffixes.size() + s * 2] = index.storage->query_range[suffix][i].first;
+            flatten_ranges[i * 2 * suffixes.size() + s * 2 + 1] = index.storage->query_range[suffix][i].second;
+        }
+    }
+
+    // Copy query ranges to GPU
+    err = cudaMemcpy(gpu_index.d_query_range, flatten_ranges, query_ranges_size, cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        printf("CudaMemcpy failed for query ranges: %s\n", cudaGetErrorString(err));
+        cudaFree(gpu_index.d_query_range);
+        delete[] flatten_queries;
+        delete[] flatten_ranges;
+        return;
+    }
+    
+    delete[] flatten_queries;
+    delete[] flatten_ranges;
+    
+    printf("✓ Copied %d queries (%d suffixes) and ranges to GPU\n", query_nb, (int)suffixes.size());
+}
+
+int* make_result_buffer_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &gpu_index) {
+    int query_nb = index.storage->query_nb;
+    size_t result_buffer_size = (size_t)query_nb * query_K * sizeof(int);
+
+    cudaError_t err = cudaMalloc((void**)&gpu_index.d_results, result_buffer_size);
+    if (err != cudaSuccess) {
+        printf("CudaMalloc failed for result buffer: %s\n", cudaGetErrorString(err));        
+        return NULL;
+    }
+
+    return gpu_index.d_results;
+
 }
 
 // CPU function to prepare data and launch GPU kernel
-void search_on_gpu(iRangeGraph::DataLoader &storage, iRangeGraph::SegmentTree *tree, int SearchEF, int edge_limit, int max_elements) {
-    // Allocate visited arrays for all threads (one per thread)
-    char* d_visited_arrays;
+void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, int SearchEF, int edge_limit) {
+    GPUIndex gpu_index;
     
-    // For each suffix in query_range
-    for (auto &range_pair : storage.query_range) {
-        int suffix = range_pair.first;
-        auto &ranges = range_pair.second;  // vector of pairs (ql, qr)
+    // Load main index data to GPU
+    load_index_to_gpu(index, gpu_index);
+    
+    // Load segment tree to GPU
+    load_segment_tree_to_gpu(index, gpu_index);
+
+    load_queries_to_gpu(index, gpu_index);
+    make_result_buffer_on_gpu(index, gpu_index);
+
+    // Initialize visited array for all queries
+    printf("\n=== Initializing Visited Array for Search ===\n");
+    int query_nb = index.storage->query_nb;
+    int max_elements = index.max_elements_;
+    int dim = index.storage->Dim;
+    
+    GPUVisitedArray visited;
+    cudaError_t err = initGPUVisitedArray(visited, query_nb, max_elements);
+    if (err != cudaSuccess) {
+        printf("Failed to initialize visited array: %s\n", cudaGetErrorString(err));
+        return;
+    }
+    printf("✓ Allocated %.2f MB for visited arrays (%d queries)\n", 
+           visited.total_size() / (1024.0*1024.0), query_nb);
+    
+    // Allocate metrics arrays on GPU
+    int* d_hops;
+    int* d_dist_comps;
+    cudaMalloc(&d_hops, query_nb * sizeof(int));
+    cudaMalloc(&d_dist_comps, query_nb * sizeof(int));
+    
+    int threads_per_block = 256;
+    int num_blocks = (query_nb + threads_per_block - 1) / threads_per_block;
+    
+    printf("\n=== Running GPU Search (EF=%d) ===\n", SearchEF);
+    printf("Configuration: %d blocks × %d threads\n", num_blocks, threads_per_block);
+    printf("Queries: %d, K: %d\n", query_nb, query_K);
+    
+    // Process each suffix (range type)
+    std::vector<int> suffixes = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 17};
+    
+    for (size_t s = 0; s < suffixes.size(); s++) {
+        int suffix = suffixes[s];
+        printf("\n--- Processing suffix %d ---\n", suffix);
         
-        printf("Processing suffix %d with %zu queries\n", suffix, ranges.size());
+        // Reset visited counters for new search
+        unsigned short* temp_curV = new unsigned short[query_nb];
+        for (int i = 0; i < query_nb; i++) temp_curV[i] = 1;
+        cudaMemcpy(visited.d_curV, temp_curV, query_nb * sizeof(unsigned short), cudaMemcpyHostToDevice);
+        cudaMemset(visited.d_mass, 0, (size_t)query_nb * max_elements * sizeof(unsigned short));
+        delete[] temp_curV;
         
-        int part_size = ranges.size() / 100;  // Assuming 10 suffixes
-        // Flatten range data for GPU: [ql0, qr0, ql1, qr1, ...]
-        int *h_range_data = new int[part_size * 2];
-        for (size_t i = 0; i < part_size; i++) {
-            h_range_data[i * 2] = ranges[i].first;      // ql
-            h_range_data[i * 2 + 1] = ranges[i].second; // qr
-        }
+        // Time the kernel
+        cudaEvent_t start, stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+        cudaEventRecord(start);
         
-        // Allocate GPU memory with unified memory
-        int *d_range_data;
-        cudaMallocManaged(&d_range_data, part_size * 2 * sizeof(int));
-        memcpy(d_range_data, h_range_data, part_size * 2 * sizeof(int));
+        // Launch kernel
+        unsigned long long kernel_seed = std::chrono::system_clock::now().time_since_epoch().count();
+        irange_search_kernel<<<num_blocks, threads_per_block>>>(
+            gpu_index, visited, query_nb, SearchEF, query_K, dim, s, d_hops, d_dist_comps,
+            index.size_links_per_layer_, kernel_seed
+        );
         
-        // Allocate visited arrays (one per thread)
-        cudaMalloc(&d_visited_arrays, (long long)part_size * max_elements * sizeof(char));
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
         
-        // Launch kernel - one thread per query
-        int threads = 256;
-        int blocks = (part_size + threads - 1) / threads;
-        search_gpu<<<blocks, threads>>>(d_range_data, part_size, part_size, SearchEF, edge_limit, tree, d_visited_arrays, max_elements);
-        
-        // Check for kernel launch errors
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            printf("CUDA kernel launch error: %s\n", cudaGetErrorString(err));
-        }
+        float milliseconds = 0;
+        cudaEventElapsedTime(&milliseconds, start, stop);
+        float searchtime = milliseconds / 1000.0f;  // Convert to seconds
         
         cudaDeviceSynchronize();
-        
-        // Check for kernel execution errors
         err = cudaGetLastError();
         if (err != cudaSuccess) {
-            printf("CUDA kernel execution error: %s\n", cudaGetErrorString(err));
+            printf("Search kernel error: %s\n", cudaGetErrorString(err));
+            continue;
         }
         
-        // Cleanup
-        cudaFree(d_visited_arrays);
-        cudaFree(d_range_data);
-        delete[] h_range_data;
+        // Copy results back to CPU
+        int* cpu_results = new int[query_nb * query_K];
+        int* cpu_hops = new int[query_nb];
+        int* cpu_dist_comps = new int[query_nb];
+        
+        cudaMemcpy(cpu_results, gpu_index.d_results, query_nb * query_K * sizeof(int), cudaMemcpyDeviceToHost);
+        cudaMemcpy(cpu_hops, d_hops, query_nb * sizeof(int), cudaMemcpyDeviceToHost);
+        cudaMemcpy(cpu_dist_comps, d_dist_comps, query_nb * sizeof(int), cudaMemcpyDeviceToHost);
+        
+        // Compute recall if ground truth is available
+        int tp = 0;
+        if (index.storage->groundtruth.count(suffix)) {
+            auto &gt = index.storage->groundtruth[suffix];
+            for (int i = 0; i < query_nb; i++) {
+                for (int k = 0; k < query_K; k++) {
+                    int result_id = cpu_results[i * query_K + k];
+                    if (result_id != -1) {
+                        if (std::find(gt[i].begin(), gt[i].end(), result_id) != gt[i].end()) {
+                            tp++;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Calculate metrics
+        float recall = (index.storage->groundtruth.count(suffix)) ? 
+                      (1.0f * tp / query_nb / query_K) : 0.0f;
+        float qps = query_nb / searchtime;
+        
+        long long total_hops = 0;
+        long long total_dist_comps = 0;
+        for (int i = 0; i < query_nb; i++) {
+            total_hops += cpu_hops[i];
+            total_dist_comps += cpu_dist_comps[i];
+        }
+        float avg_hops = (float)total_hops / query_nb;
+        float avg_dco = (float)total_dist_comps / query_nb;
+        
+        printf("  Recall: %.4f\n", recall);
+        printf("  QPS: %.2f\n", qps);
+        printf("  Avg Distance Computations: %.2f\n", avg_dco);
+        printf("  Avg Hops: %.2f\n", avg_hops);
+        printf("  Search time: %.3f seconds\n", searchtime);
+        
+        // Save results to CSV file
+        std::string savepath = paths["result_saveprefix"] + std::to_string(suffix) + "_gpu.csv";
+        CheckPath(savepath);
+        std::ofstream outfile(savepath, std::ios::app);  // Append mode
+        if (outfile.is_open()) {
+            // Write header if file is new
+            outfile.seekp(0, std::ios::end);
+            if (outfile.tellp() == 0) {
+                outfile << "SearchEF,Recall,QPS,DCO,HOP\n";
+            }
+            outfile << SearchEF << "," << recall << "," << qps << "," << avg_dco << "," << avg_hops << "\n";
+            outfile.close();
+            printf("  ✓ Results saved to %s\n", savepath.c_str());
+        } else {
+            printf("  ✗ Failed to open %s\n", savepath.c_str());
+        }
+        
+        // Show first 3 query results for this suffix
+        if (suffix == 0) {
+            printf("\n  First 3 Query Results:\n");
+            for (int i = 0; i < 3 && i < query_nb; i++) {
+                printf("    Query %d: [", i);
+                for (int k = 0; k < query_K; k++) {
+                    printf("%d", cpu_results[i * query_K + k]);
+                    if (k < query_K - 1) printf(", ");
+                }
+                printf("] (hops=%d, dco=%d)\n", cpu_hops[i], cpu_dist_comps[i]);
+            }
+        }
+        
+        delete[] cpu_results;
+        delete[] cpu_hops;
+        delete[] cpu_dist_comps;
+        
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
     }
+    
+    // Clean up
+    cudaFree(d_hops);
+    cudaFree(d_dist_comps);
+    freeGPUVisitedArray(visited);
+
+    /* Optional: Test visited array with smaller example
+    printf("\n=== Testing Visited Array ===\n");
+    int test_queries = 3;
+    int max_elements = index.max_elements_;
+    
+    GPUVisitedArray visited;
+    cudaError_t err = initGPUVisitedArray(visited, test_queries, max_elements);
+    if (err != cudaSuccess) {
+        printf("Failed to initialize visited array: %s\n", cudaGetErrorString(err));
+    } else {
+        printf("✓ Allocated %.2f MB for visited arrays\n", 
+               visited.total_size() / (1024.0*1024.0));
+        printf("  - %d queries × %d nodes = %zu counters\n",
+               test_queries, max_elements, (size_t)test_queries * max_elements);
+        
+        // Run test kernel with 3 queries
+        test_visited_array<<<1, test_queries>>>(visited);
+        cudaDeviceSynchronize();
+        
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            printf("Test kernel error: %s\n", cudaGetErrorString(err));
+        }
+        
+        freeGPUVisitedArray(visited);
+    }
+    */
+    
+    int size_of_node = sizeof(iRangeGraph::TreeNode);
+    printf("\nSize of TreeNode: %d bytes\n", size_of_node);
+    int size_of_tree = sizeof(iRangeGraph::SegmentTree);
+    printf("Size of SegmentTree: %d bytes\n", size_of_tree);
+    
+    // Clean up GPU memory
+    if (gpu_index.d_data_memory) cudaFree(gpu_index.d_data_memory);
+    if (gpu_index.d_segment_tree.d_nodes) cudaFree(gpu_index.d_segment_tree.d_nodes);
+    if (gpu_index.d_query_vectors) cudaFree(gpu_index.d_query_vectors);
+    if (gpu_index.d_query_range) cudaFree(gpu_index.d_query_range);
+    if (gpu_index.d_results) cudaFree(gpu_index.d_results);
+    
+    printf("✓ GPU memory cleaned up\n");
 }
 
 // CUDA kernel for vector addition
@@ -461,9 +485,7 @@ int main(int argc, char **argv) {
     if (argc != 15)
         throw Exception("please check input parameters");
 
-    // Test heaps first
-    test_heaps();
-
+    
     iRangeGraph::DataLoader storage;
     storage.query_K = query_K;
     std::cout << "Loading queries..." << std::endl;
@@ -472,7 +494,8 @@ int main(int argc, char **argv) {
     // Generate(storage);
     std::cout << "Loading query ranges..." << std::endl;
     storage.LoadQueryRange(paths["range_saveprefix"]);
-    // storage.LoadGroundtruth(paths["groundtruth_saveprefix"]);  // Skip for now
+    std::cout << "Loading ground truth..." << std::endl;
+    storage.LoadGroundtruth(paths["groundtruth_saveprefix"]);
 
     std::cout << "Loading index..." << std::endl;
     iRangeGraph::iRangeGraph_Search<float> index(paths["data_vector"], paths["index"], &storage, M);
@@ -480,10 +503,8 @@ int main(int argc, char **argv) {
     int SearchEF = 500;
     
     // Call GPU search function
-    search_on_gpu(storage, index.tree, SearchEF, M, index.max_elements_);
+    search_on_gpu(index, SearchEF, M);
     
-    cudaDeviceSynchronize();
-    printf("GPU search completed!\n");
     
     return 0;
 }
