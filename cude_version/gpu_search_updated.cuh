@@ -5,6 +5,9 @@
 #include "gpu_visited.cuh"
 #include "gpu_heap.cuh"
 
+// Maximum SearchEF value supported (arrays allocated to this size)
+#define MAX_SEARCH_EF 2000
+
 // ============ GPU Range Filter ============
 // Filter segment tree nodes that overlap with query range [ql, qr]
 __device__ int range_filter_gpu(GPUNode* d_nodes, int root_idx, int ql, int qr, 
@@ -222,10 +225,12 @@ __global__ void irange_search_kernel(
     }
     
     // Allocate heap buffers in local memory
-    HeapNode candidate_buffer[SearchEF];  // Buffer for candidates (SearchEF)
-    HeapNode result_buffer[query_K];     // Buffer for results (query_K)
+    // Use MAX_SEARCH_EF as compile-time constant, but heap will only use SearchEF elements
+    HeapNode candidate_buffer[MAX_SEARCH_EF];  // Buffer for candidates (up to MAX_SEARCH_EF)
+    HeapNode result_buffer[10];                 // Buffer for results (query_K, typically 10)
     
     // Create candidate heap (min-heap for EF candidates)
+    // The heap will only use the first SearchEF elements
     MinHeap candidates;
     candidates.init(candidate_buffer, SearchEF);
     

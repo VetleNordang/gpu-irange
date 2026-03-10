@@ -23,6 +23,7 @@
 
 	// Use 'postCreateCommand' to run commands after the container is created.
 	// "postCreateCommand": "pip3 install -r python/requirements.txt",
+	"postCreateCommand": "apt update && apt install -y wget && pip3 install tensorflow-datasets tensorflow numpy pandas matplotlib"
 
 	// Configure tool-specific properties.
 	// "customizations": {},

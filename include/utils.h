@@ -250,7 +250,8 @@ namespace iRangeGraph
                 std::vector<std::vector<int>> all_results(query_nb);
                 
                 // Parallelize over queries (each query independent)
-                # pragma omp parallel for num_threads(32)
+                # pragma omp parallel for
+                //num_threads(32)
                 for (int i = 0; i < query_nb; i++)
                 {
                     auto rp = t.second[i];
