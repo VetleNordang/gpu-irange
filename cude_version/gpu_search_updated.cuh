@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cuda_runtime.h>
+#include <float.h>
 #include "gpu_index.cuh"
 #include "gpu_visited.cuh"
 #include "gpu_heap.cuh"
@@ -226,17 +227,18 @@ __global__ void irange_search_kernel(
     
     // Allocate heap buffers in local memory
     // Use MAX_SEARCH_EF as compile-time constant, but heap will only use SearchEF elements
-    HeapNode candidate_buffer[MAX_SEARCH_EF];  // Buffer for candidates (up to MAX_SEARCH_EF)
-    HeapNode result_buffer[10];                 // Buffer for results (query_K, typically 10)
+    HeapNode candidate_buffer[MAX_SEARCH_EF];  // Buffer for exploration queue - NO LIMIT!
+    HeapNode top_candidate_buffer[MAX_SEARCH_EF];  // Buffer for EF best candidates
     
-    // Create candidate heap (min-heap for EF candidates)
-    // The heap will only use the first SearchEF elements
-    MinHeap candidates;
-    candidates.init(candidate_buffer, SearchEF);
+    // Create candidate_set (min-heap) - exploration queue, can grow up to MAX_SEARCH_EF
+    // This should be UNLIMITED (up to MAX) - like std::priority_queue in CPU version
+    MinHeap candidate_set;
+    candidate_set.init(candidate_buffer, MAX_SEARCH_EF);  // ✅ Use MAX, not SearchEF!
     
-    // Create result heap (max-heap for K results)
-    MaxHeap results;
-    results.init(result_buffer, query_K);
+    // Create top_candidates (max-heap) - maintains only SearchEF best candidates
+    // This is the one that should be limited to SearchEF
+    MaxHeap top_candidates;
+    top_candidates.init(top_candidate_buffer, SearchEF);  // ✅ Limited to SearchEF
     
     // Initialize random state for this query
     unsigned int rng_state = (unsigned int)(seed + query_id);
@@ -265,35 +267,32 @@ __global__ void irange_search_kernel(
                                       dim);
         dist_comp_count++;
         
-        // Add to candidates and results
-        candidates.push(entry_dist, entry_point);
-        results.push(entry_dist, entry_point);
-        if (results.size > query_K) {
-            results.pop();
+        // Add to both heaps (CPU does this unconditionally for entry points)
+        candidate_set.push(entry_dist, entry_point);
+        top_candidates.push(entry_dist, entry_point);
+        
+        // If top_candidates exceeds SearchEF, remove worst
+        if (top_candidates.size > SearchEF) {
+            top_candidates.pop();
         }
     }
     
-    // Greedy search
-    while (!candidates.empty()) {
-        // Get closest candidate
-        HeapNode current = candidates.top();
-        candidates.pop();
+    // Track lower bound from top_candidates (worst of EF best)
+    float lowerBound = (top_candidates.size > 0) ? top_candidates.top().dist : FLT_MAX;
+    
+    // Greedy search - matches CPU version exactly
+    while (!candidate_set.empty()) {
+        // Get closest candidate from exploration queue (MinHeap)
+        HeapNode current = candidate_set.top();
         
-        hop_count++;  // Count each node expansion as a hop
+        hop_count++;  // Count BEFORE termination check (like CPU)
         
-        // If this candidate is farther than our worst result, stop
-        if (results.size >= query_K) {
-            float worst_result_dist = results.top().dist;
-            if (current.dist > worst_result_dist) {
-                break;
-            }
+        // Early termination: if current candidate is farther than worst in top_candidates, stop
+        if (current.dist > lowerBound) {
+            break;
         }
         
-        // Add to results
-        results.push(current.dist, current.id);
-        if (results.size > query_K) {
-            results.pop();  // Keep only K best
-        }
+        candidate_set.pop();  // Pop AFTER check passes
         
         // Explore neighbors using SelectEdge (depth-aware edge selection)
         int selected_edges[50];  // Buffer for edges (M=32, but allow more)
@@ -320,27 +319,35 @@ __global__ void irange_search_kernel(
                                             dim);
             dist_comp_count++;  // Count distance computation
             
-            // Add to candidates if promising
-            if (candidates.size < SearchEF) {
-                candidates.push(neighbor_dist, neighbor_id);
-            } else {
-                float worst_candidate_dist = candidates.top().dist;
-                if (neighbor_dist < worst_candidate_dist) {
-                    candidates.pop();
-                    candidates.push(neighbor_dist, neighbor_id);
-                }
+            // Add to candidate_set and top_candidates (exactly like CPU version)
+            if (top_candidates.size < SearchEF) {
+                // Not at EF limit yet - add unconditionally
+                candidate_set.push(neighbor_dist, neighbor_id);
+                top_candidates.push(neighbor_dist, neighbor_id);
+                lowerBound = top_candidates.top().dist;  // Update bound (worst of EF best)
+            } else if (neighbor_dist < lowerBound) {
+                // Better than worst - add then pop (like CPU: emplace + pop)
+                candidate_set.push(neighbor_dist, neighbor_id);
+                top_candidates.push(neighbor_dist, neighbor_id);  // Adds (size becomes SearchEF+1)
+                top_candidates.pop();                              // Removes worst (size back to SearchEF)
+                lowerBound = top_candidates.top().dist;           // Update bound
             }
         }
     }
     
-    // Write results to global memory
+    // Trim top_candidates down to query_K (like CPU version)
+    while (top_candidates.size > query_K) {
+        top_candidates.pop();  // Remove worst until we have K results
+    }
+    
+    // Write results to global memory from top_candidates
     int* result_ptr = gpu_index.d_results + (long long)query_id * query_K;
-    for (int i = 0; i < query_K && i < results.size; i++) {
-        result_ptr[i] = results.data[i].id;
+    for (int i = 0; i < query_K && i < top_candidates.size; i++) {
+        result_ptr[i] = top_candidates.data[i].id;
     }
     
     // Fill remaining with -1 if fewer than K results found
-    for (int i = results.size; i < query_K; i++) {
+    for (int i = top_candidates.size; i < query_K; i++) {
         result_ptr[i] = -1;
     }
     

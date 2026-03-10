@@ -136,12 +136,9 @@ struct MaxHeap {
             data[size].id = id;
             heapify_up(size);
             size++;
-        } else if (dist < data[0].dist) {
-            // Replace worst element
-            data[0].dist = dist;
-            data[0].id = id;
-            heapify_down(0);
         }
+        // Note: When full, just ignore (caller should check and handle)
+        // This matches std::priority_queue behavior (unbounded growth)
     }
     
     __device__ HeapNode top() {
