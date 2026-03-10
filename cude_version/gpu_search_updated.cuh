@@ -233,13 +233,12 @@ __global__ void irange_search_kernel(
     // Create candidate_set (min-heap) - exploration queue, can grow up to MAX_SEARCH_EF
     // This should be UNLIMITED (up to MAX) - like std::priority_queue in CPU version
     MinHeap candidate_set;
-    candidate_set.init(candidate_buffer, MAX_SEARCH_EF);  // ✅ Use MAX, not SearchEF!
+    candidate_set.init(candidate_buffer, MAX_SEARCH_EF);  
     
     // Create top_candidates (max-heap) - maintains only SearchEF best candidates
-    // This is the one that should be limited to SearchEF
+    // Capacity must be SearchEF+1 to allow push+pop pattern (temporarily grows to EF+1, then pop back to EF)
     MaxHeap top_candidates;
-    top_candidates.init(top_candidate_buffer, SearchEF);  // ✅ Limited to SearchEF
-    
+    top_candidates.init(top_candidate_buffer, SearchEF + 1); 
     // Initialize random state for this query
     unsigned int rng_state = (unsigned int)(seed + query_id);
     
