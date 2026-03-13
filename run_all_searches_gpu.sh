@@ -9,13 +9,17 @@ echo "================================================"
 
 # Default parameters
 M=32
-GPU_EXECUTABLE="./cude_version/build/hello"
+GPU_EXECUTABLE="./cude_version/build/optimized_test"
+PLOT_SCRIPT="./python/plots/plot_gpu_vs_cpu.py"
 
 # Check if GPU executable exists
 if [ ! -f "$GPU_EXECUTABLE" ]; then
-    echo "Error: GPU executable not found at $GPU_EXECUTABLE"
-    echo "Please build the GPU version first: cd cude_version && make"
-    exit 1
+    echo "Optimized GPU executable not found at $GPU_EXECUTABLE"
+    echo "Building optimized GPU target..."
+    if ! make -C ./cude_version optimized_test; then
+        echo "Error: failed to build optimized GPU target"
+        exit 1
+    fi
 fi
 
 # Track results
@@ -42,40 +46,31 @@ run_gpu_search() {
         echo "✗ $dataset_name failed (exit code: $exit_code)"
         FAILURES+=("$dataset_name")
     fi
+
+    echo "Running plots after: $dataset_name"
+    if [ -f "$PLOT_SCRIPT" ]; then
+        if python3 "$PLOT_SCRIPT"; then
+            echo "✓ Plot generation completed"
+        else
+            echo "✗ Plot generation failed (continuing to next dataset)"
+        fi
+    else
+        echo "✗ Plot script not found at $PLOT_SCRIPT (continuing to next dataset)"
+    fi
 }
 
-# ============================================
-# GIST 250k Index
-# ============================================
-run_gpu_search "GIST 250k" \
-    --data_path exectable_data/gist1m/250k/gist_base_250k.bin \
-    --query_path exectable_data/gist1m/250k/gist_query_250k.bin \
-    --range_saveprefix exectable_data/gist1m/250k/query_ranges/query_ranges_250k \
-    --groundtruth_saveprefix exectable_data/gist1m/250k/ground_truth/ground_truth_250k \
-    --index_file exectable_data/gist1m/250k/gist_250k.index \
-    --result_saveprefix exectable_data/gist1m/250k/results/results_250k_gpu
+# # ============================================
+# # GIST 750k Index
+# # ============================================
+# run_gpu_search "GIST 750k" \
+#     --data_path exectable_data/gist1m/750k/gist_base_750k.bin \
+#     --query_path exectable_data/gist1m/750k/gist_query_750k.bin \
+#     --range_saveprefix exectable_data/gist1m/750k/query_ranges/query_ranges_750k \
+#     --groundtruth_saveprefix exectable_data/gist1m/750k/ground_truth/ground_truth_750k \
+#     --index_file exectable_data/gist1m/750k/gist_750k.index \
+#     --result_saveprefix exectable_data/gist1m/750k/results/results_750k_gpu
 
-# ============================================
-# GIST 500k Index
-# ============================================
-run_gpu_search "GIST 500k" \
-    --data_path exectable_data/gist1m/500k/gist_base_500k.bin \
-    --query_path exectable_data/gist1m/500k/gist_query_500k.bin \
-    --range_saveprefix exectable_data/gist1m/500k/query_ranges/query_ranges_500k \
-    --groundtruth_saveprefix exectable_data/gist1m/500k/ground_truth/ground_truth_500k \
-    --index_file exectable_data/gist1m/500k/gist_500k.index \
-    --result_saveprefix exectable_data/gist1m/500k/results/results_500k_gpu
 
-# ============================================
-# GIST 750k Index
-# ============================================
-run_gpu_search "GIST 750k" \
-    --data_path exectable_data/gist1m/750k/gist_base_750k.bin \
-    --query_path exectable_data/gist1m/750k/gist_query_750k.bin \
-    --range_saveprefix exectable_data/gist1m/750k/query_ranges/query_ranges_750k \
-    --groundtruth_saveprefix exectable_data/gist1m/750k/ground_truth/ground_truth_750k \
-    --index_file exectable_data/gist1m/750k/gist_750k.index \
-    --result_saveprefix exectable_data/gist1m/750k/results/results_750k_gpu
 
 # ============================================
 # Video (YouTube RGB) Index
@@ -87,6 +82,29 @@ run_gpu_search "Video (YouTube RGB)" \
     --groundtruth_saveprefix exectable_data/video/ground_truth/ground_truth \
     --index_file exectable_data/video/youtube_rgb.index \
     --result_saveprefix exectable_data/video/results/results_gpu
+
+# # ============================================
+# # GIST 250k Index
+# # ============================================
+# run_gpu_search "GIST 250k" \
+#     --data_path exectable_data/gist1m/250k/gist_base_250k.bin \
+#     --query_path exectable_data/gist1m/250k/gist_query_250k.bin \
+#     --range_saveprefix exectable_data/gist1m/250k/query_ranges/query_ranges_250k \
+#     --groundtruth_saveprefix exectable_data/gist1m/250k/ground_truth/ground_truth_250k \
+#     --index_file exectable_data/gist1m/250k/gist_250k.index \
+#     --result_saveprefix exectable_data/gist1m/250k/results/results_250k_gpu
+
+# # ============================================
+# # GIST 500k Index
+# # ============================================
+# run_gpu_search "GIST 500k" \
+#     --data_path exectable_data/gist1m/500k/gist_base_500k.bin \
+#     --query_path exectable_data/gist1m/500k/gist_query_500k.bin \
+#     --range_saveprefix exectable_data/gist1m/500k/query_ranges/query_ranges_500k \
+#     --groundtruth_saveprefix exectable_data/gist1m/500k/ground_truth/ground_truth_500k \
+#     --index_file exectable_data/gist1m/500k/gist_500k.index \
+#     --result_saveprefix exectable_data/gist1m/500k/results/results_500k_gpu
+
 
 # ============================================
 # Audi Index

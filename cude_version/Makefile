@@ -1,8 +1,10 @@
 NVCC = nvcc
 ARCH = -arch=sm_60
 INCLUDE = -I../include
+OPT_FLAGS = -O3 --use_fast_math -lineinfo -Xcompiler "-O3 -march=native -fopenmp -DNDEBUG"
 BUILD_DIR = build
 TARGET = $(BUILD_DIR)/hello
+OPT_TARGET = $(BUILD_DIR)/optimized_test
 SOURCE = hello.cu
 HEADERS = gpu_search.cuh ../include/iRG_search.h ../include/utils.h
 
@@ -29,10 +31,18 @@ $(BUILD_DIR):
 $(TARGET): $(BUILD_DIR) $(SOURCE) $(HEADERS)
 	$(NVCC) $(ARCH) $(INCLUDE) $(SOURCE) -o $(TARGET)
 
+optimized_test: $(OPT_TARGET)
+
+$(OPT_TARGET): $(BUILD_DIR) $(SOURCE) $(HEADERS)
+	$(NVCC) $(ARCH) $(OPT_FLAGS) $(INCLUDE) $(SOURCE) -o $(OPT_TARGET)
+
 run: $(TARGET)
 	$(TARGET) $(ARGS)
+
+run_optimized_test: $(OPT_TARGET)
+	$(OPT_TARGET) $(ARGS)
 
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: all run clean
+.PHONY: all run optimized_test run_optimized_test clean

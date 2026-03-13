@@ -284,7 +284,7 @@ namespace iRangeGraph
                     timeval t1, t2;
                     gettimeofday(&t1, NULL);
                     
-                    # pragma omp parallel for reduction(+:tp) num_threads(32)
+                    # pragma omp parallel for reduction(+:tp)
 
                     for (int i = 0; i < storage->query_nb; i++)
                     {

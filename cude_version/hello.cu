@@ -263,12 +263,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     make_result_buffer_on_gpu(index, gpu_index);
 
     iRangeGraph::DataLoader *storage = index.storage;
-    
-    // Map suffixes to their indices (for GPU array indexing)
-    std::vector<int> suffix_keys;
-    for (auto range : storage->query_range) {
-        suffix_keys.push_back(range.first);
-    }
+
     
     // Structure to store all results in memory before writing to disk
     // Map: suffix -> vector of (SearchEF, Recall, QPS, DCO, HOP)
@@ -311,7 +306,9 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             cudaMemset(d_dist_comps, 0, query_nb * sizeof(int));
             
             int threads_per_block = 256;
-            int num_blocks = (query_nb + threads_per_block - 1) / threads_per_block;
+            int threads_per_query = 32;  // Number of threads to collaborate on each query
+            int queries_per_block = threads_per_block / threads_per_query;
+            int num_blocks = (query_nb + queries_per_block - 1) / queries_per_block;
             
             printf("Configuration: %d blocks × %d threads, Queries: %d, K: %d\n", 
                    num_blocks, threads_per_block, query_nb, query_K);

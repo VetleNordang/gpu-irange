@@ -185,7 +185,16 @@ __device__ unsigned int xorshift32(unsigned int* state) {
     return x;
 }
 
-// ============ Main Search Kernel ============
+// ============ Warp-cooperative Search Kernel ============
+// 32 threads (one warp) collaborate on every query:
+//   - Lane 0 owns the heap, SelectEdge, loop control, and result writing.
+//   - All 32 lanes compute neighbour distances in parallel each iteration.
+//   - __syncwarp() coordinates the two phases.
+// Hardcoded assumption: at most 32 neighbours per node (THREADS_PER_QUERY).
+
+#define THREADS_PER_QUERY     32
+#define MAX_QUERIES_PER_BLOCK  8   // blockDim.x (256) / THREADS_PER_QUERY (32)
+
 __global__ void irange_search_kernel(
     GPUIndex gpu_index,
     GPUVisitedArray visited,
@@ -193,164 +202,183 @@ __global__ void irange_search_kernel(
     int SearchEF,
     int query_K,
     int dim,
-    int suffix_id,  // Which range to use (0-9, or 10 for suffix 17)
-    int* d_hops,    // Output: hops per query
-    int* d_dist_comps,  // Output: distance computations per query
-    size_t size_links_per_layer,  // Size of one layer's link list
-    unsigned long long seed  // Random seed
+    int suffix_id,           // Which range to use
+    int* d_hops,             // Output: hops per query
+    int* d_dist_comps,       // Output: distance computations per query
+    size_t size_links_per_layer,
+    unsigned long long seed
 ) {
-    int query_id = blockIdx.x * blockDim.x + threadIdx.x;
-    
+    // --- Warp / lane identity ---
+    const int lane_id           = threadIdx.x % THREADS_PER_QUERY;
+    const int warp_in_blk       = threadIdx.x / THREADS_PER_QUERY;  // 0..7
+    const int queries_per_block = blockDim.x  / THREADS_PER_QUERY;
+    const int query_id          = blockIdx.x  * queries_per_block + warp_in_blk;
+
     if (query_id >= query_nb) return;
-    
-    // Initialize metrics for this query
-    int hop_count = 0;
-    int dist_comp_count = 0;
-    
-    // Get query vector
+
+    // --- Shared memory: one slot per warp in the block ---
+    // s_edges    : neighbour IDs written by lane-0's SelectEdge call
+    // s_dists    : distances computed in parallel by all 32 lanes
+    // s_num_edges: edge count set by lane 0; -1 signals loop termination
+    __shared__ int   s_edges    [MAX_QUERIES_PER_BLOCK][THREADS_PER_QUERY];
+    __shared__ float s_dists    [MAX_QUERIES_PER_BLOCK][THREADS_PER_QUERY];
+    __shared__ int   s_num_edges[MAX_QUERIES_PER_BLOCK];
+
+    // --- Per-query values readable by all lanes ---
     float* query_vector = gpu_index.d_query_vectors + (long long)query_id * dim;
-    
-    // Get query range [ql, qr]
-    int range_idx = query_id * 22 + suffix_id * 2;  // 11 suffixes × 2 values
-    int ql = gpu_index.d_query_range[range_idx];
-    int qr = gpu_index.d_query_range[range_idx + 1];
-    
-    // Filter segment tree to get nodes overlapping with [ql, qr]
-    int filtered_indices[100];
-    int num_filtered = range_filter_gpu(gpu_index.d_segment_tree.d_nodes, 0, ql, qr, 
-                                       filtered_indices, 100);
-    
-    if (query_id == 0) {
-        printf("Query %d Suffix %d: Range [%d, %d] -> %d filtered nodes\n", 
-               query_id, suffix_id, ql, qr, num_filtered);
-    }
-    
-    // Allocate heap buffers in local memory
-    // Use MAX_SEARCH_EF as compile-time constant, but heap will only use SearchEF elements
-    HeapNode candidate_buffer[MAX_SEARCH_EF];  // Buffer for exploration queue - NO LIMIT!
-    HeapNode top_candidate_buffer[MAX_SEARCH_EF];  // Buffer for EF best candidates
-    
-    // Create candidate_set (min-heap) - exploration queue, can grow up to MAX_SEARCH_EF
-    // This should be UNLIMITED (up to MAX) - like std::priority_queue in CPU version
-    MinHeap candidate_set;
-    candidate_set.init(candidate_buffer, MAX_SEARCH_EF);  
-    
-    // Create top_candidates (max-heap) - maintains only SearchEF best candidates
-    // Capacity must be SearchEF+1 to allow push+pop pattern (temporarily grows to EF+1, then pop back to EF)
-    MaxHeap top_candidates;
-    top_candidates.init(top_candidate_buffer, SearchEF + 1); 
-    // Initialize random state for this query
-    unsigned int rng_state = (unsigned int)(seed + query_id);
-    
-    // Add entry points from ALL filtered segments (like CPU version)
-    for (int f = 0; f < num_filtered; f++) {
-        int seg_idx = filtered_indices[f];
-        GPUNode seg_node = gpu_index.d_segment_tree.d_nodes[seg_idx];
-        
-        // Pick random point within segment bounds [lbound, rbound]
-        int range_size = seg_node.rbound - seg_node.lbound + 1;
-        int random_offset = xorshift32(&rng_state) % range_size;
-        int entry_point = seg_node.lbound + random_offset;
-        
-        // Skip if already visited
-        if (isVisited(visited, query_id, entry_point)) continue;
-        
-        // Mark as visited
-        markVisited(visited, query_id, entry_point);
-        
-        // Compute distance
-        float entry_dist = L2Distance(query_vector, 
-                                      getVectorByID(entry_point, gpu_index.d_data_memory,
-                                                   gpu_index.d_size_data_per_element,
-                                                   gpu_index.d_offsetData),
-                                      dim);
-        dist_comp_count++;
-        
-        // Add to both heaps (CPU does this unconditionally for entry points)
-        candidate_set.push(entry_dist, entry_point);
-        top_candidates.push(entry_dist, entry_point);
-        
-        // If top_candidates exceeds SearchEF, remove worst
-        if (top_candidates.size > SearchEF) {
-            top_candidates.pop();
+    int    range_idx    = query_id * 22 + suffix_id * 2;  // 11 suffixes x 2 values
+    int    ql           = gpu_index.d_query_range[range_idx];
+    int    qr           = gpu_index.d_query_range[range_idx + 1];
+
+    // --- Heap storage in per-thread local memory (only lane 0 uses it) ---
+    HeapNode candidate_buffer    [MAX_SEARCH_EF];
+    HeapNode top_candidate_buffer[MAX_SEARCH_EF];
+    MinHeap  candidate_set;
+    MaxHeap  top_candidates;
+    float    lowerBound     = FLT_MAX;
+    int      hop_count      = 0;
+    int      dist_comp_count = 0;
+
+    // =========================================================
+    // Phase 1 - Entry-point seeding (lane 0 only)
+    // =========================================================
+    if (lane_id == 0) {
+        candidate_set.init(candidate_buffer,     MAX_SEARCH_EF);
+        top_candidates.init(top_candidate_buffer, SearchEF + 1);
+
+        unsigned int rng_state = (unsigned int)(seed + query_id);
+
+        int filtered_indices[100];
+        int num_filtered = range_filter_gpu(gpu_index.d_segment_tree.d_nodes, 0, ql, qr,
+                                            filtered_indices, 100);
+
+        if (query_id == 0) {
+            printf("Query %d Suffix %d: Range [%d, %d] -> %d filtered nodes\n",
+                   query_id, suffix_id, ql, qr, num_filtered);
         }
-    }
-    
-    // Track lower bound from top_candidates (worst of EF best)
-    float lowerBound = (top_candidates.size > 0) ? top_candidates.top().dist : FLT_MAX;
-    
-    // Greedy search - matches CPU version exactly
-    while (!candidate_set.empty()) {
-        // Get closest candidate from exploration queue (MinHeap)
-        HeapNode current = candidate_set.top();
-        
-        hop_count++;  // Count BEFORE termination check (like CPU)
-        
-        // Early termination: if current candidate is farther than worst in top_candidates, stop
-        if (current.dist > lowerBound) {
-            break;
+
+        for (int f = 0; f < num_filtered; f++) {
+            GPUNode seg_node  = gpu_index.d_segment_tree.d_nodes[filtered_indices[f]];
+            int range_size    = seg_node.rbound - seg_node.lbound + 1;
+            int entry_point   = seg_node.lbound + (xorshift32(&rng_state) % range_size);
+
+            if (isVisited(visited, query_id, entry_point)) continue;
+            markVisited(visited, query_id, entry_point);
+
+            float entry_dist = L2Distance(
+                query_vector,
+                getVectorByID(entry_point, gpu_index.d_data_memory,
+                              gpu_index.d_size_data_per_element, gpu_index.d_offsetData),
+                dim);
+            dist_comp_count++;
+
+            candidate_set.push(entry_dist, entry_point);
+            top_candidates.push(entry_dist, entry_point);
+            if (top_candidates.size > SearchEF) top_candidates.pop();
         }
-        
-        candidate_set.pop();  // Pop AFTER check passes
-        
-        // Explore neighbors using SelectEdge (depth-aware edge selection)
-        int selected_edges[50];  // Buffer for edges (M=32, but allow more)
-        int num_edges = 0;
-        
-        SelectEdge_gpu(current.id, ql, qr, 50,  // edge_limit
-                      gpu_index.d_segment_tree.d_nodes, 0,  // root at index 0
-                      gpu_index.d_data_memory, gpu_index.d_size_data_per_element,
-                      size_links_per_layer,
-                      visited, query_id,
-                      selected_edges, &num_edges);
-        
-        for (int i = 0; i < num_edges; i++) {
-            int neighbor_id = selected_edges[i];
-            
-            // Mark as visited (already checked in SelectEdge, but mark explicitly)
-            markVisited(visited, query_id, neighbor_id);
-            
-            // Compute distance
-            float neighbor_dist = L2Distance(query_vector,
-                                            getVectorByID(neighbor_id, gpu_index.d_data_memory,
-                                                        gpu_index.d_size_data_per_element,
-                                                        gpu_index.d_offsetData),
-                                            dim);
-            dist_comp_count++;  // Count distance computation
-            
-            // Add to candidate_set and top_candidates (exactly like CPU version)
-            if (top_candidates.size < SearchEF) {
-                // Not at EF limit yet - add unconditionally
-                candidate_set.push(neighbor_dist, neighbor_id);
-                top_candidates.push(neighbor_dist, neighbor_id);
-                lowerBound = top_candidates.top().dist;  // Update bound (worst of EF best)
-            } else if (neighbor_dist < lowerBound) {
-                // Better than worst - add then pop (like CPU: emplace + pop)
-                candidate_set.push(neighbor_dist, neighbor_id);
-                top_candidates.push(neighbor_dist, neighbor_id);  // Adds (size becomes SearchEF+1)
-                top_candidates.pop();                              // Removes worst (size back to SearchEF)
-                lowerBound = top_candidates.top().dist;           // Update bound
+
+        lowerBound = (top_candidates.size > 0) ? top_candidates.top().dist : FLT_MAX;
+
+        // Pre-clear so the first __syncwarp is well-defined
+        s_num_edges[warp_in_blk] = 0;
+    }
+    __syncwarp();
+
+    // =========================================================
+    // Phase 2 - Greedy search with parallel distance computation
+    // =========================================================
+    // Each iteration:
+    //  a) Lane 0 checks termination; calls SelectEdge; writes s_edges / s_num_edges.
+    //     s_num_edges == -1 signals "stop".
+    //  b) __syncwarp()
+    //  c) All lanes break if s_num_edges == -1.
+    //  d) Lane i computes L2Distance for s_edges[i], stores in s_dists[i].
+    //  e) __syncwarp()
+    //  f) Lane 0 reads s_dists[], marks visited, inserts into heaps.
+
+    while (true) {
+        // --- (a) Lane 0: advance one greedy step ---
+        if (lane_id == 0) {
+            if (candidate_set.empty()) {
+                s_num_edges[warp_in_blk] = -1;            // stop: exhausted
+            } else {
+                HeapNode current = candidate_set.top();
+                hop_count++;
+                if (current.dist > lowerBound) {
+                    s_num_edges[warp_in_blk] = -1;        // stop: below bound
+                } else {
+                    candidate_set.pop();
+                    // SelectEdge writes directly into shared memory (at most 32 neighbours)
+                    SelectEdge_gpu(current.id, ql, qr, THREADS_PER_QUERY,
+                                   gpu_index.d_segment_tree.d_nodes, 0,
+                                   gpu_index.d_data_memory,
+                                   gpu_index.d_size_data_per_element,
+                                   size_links_per_layer,
+                                   visited, query_id,
+                                   s_edges[warp_in_blk], &s_num_edges[warp_in_blk]);
+                }
             }
         }
+
+        // --- (b) Sync: all lanes can now read s_num_edges / s_edges ---
+        __syncwarp();
+
+        // --- (c) Termination check (all lanes) ---
+        if (s_num_edges[warp_in_blk] == -1) break;
+
+        const int num_edges = s_num_edges[warp_in_blk];
+
+        // --- (d) All 32 lanes compute their assigned neighbour's distance in parallel ---
+        if (lane_id < num_edges) {
+            int   neighbor_id   = s_edges[warp_in_blk][lane_id];
+            float neighbor_dist = L2Distance(
+                query_vector,
+                getVectorByID(neighbor_id, gpu_index.d_data_memory,
+                              gpu_index.d_size_data_per_element, gpu_index.d_offsetData),
+                dim);
+            s_dists[warp_in_blk][lane_id] = neighbor_dist;
+        }
+
+        // --- (e) Sync: lane 0 can now read all distances ---
+        __syncwarp();
+
+        // --- (f) Lane 0: mark visited + heap insertion ---
+        if (lane_id == 0) {
+            for (int i = 0; i < num_edges; i++) {
+                int   neighbor_id   = s_edges[warp_in_blk][i];
+                float neighbor_dist = s_dists[warp_in_blk][i];
+
+                markVisited(visited, query_id, neighbor_id);
+                dist_comp_count++;
+
+                if (top_candidates.size < SearchEF) {
+                    candidate_set.push(neighbor_dist, neighbor_id);
+                    top_candidates.push(neighbor_dist, neighbor_id);
+                    lowerBound = top_candidates.top().dist;
+                } else if (neighbor_dist < lowerBound) {
+                    candidate_set.push(neighbor_dist, neighbor_id);
+                    top_candidates.push(neighbor_dist, neighbor_id);
+                    top_candidates.pop();           // keep size at SearchEF
+                    lowerBound = top_candidates.top().dist;
+                }
+            }
+        }
+        // No extra __syncwarp needed: next iteration starts with lane-0 work
     }
-    
-    // Trim top_candidates down to query_K (like CPU version)
-    while (top_candidates.size > query_K) {
-        top_candidates.pop();  // Remove worst until we have K results
+
+    // =========================================================
+    // Phase 3 - Write results (lane 0 only)
+    // =========================================================
+    if (lane_id == 0) {
+        while (top_candidates.size > query_K) top_candidates.pop();
+
+        int* result_ptr = gpu_index.d_results + (long long)query_id * query_K;
+        for (int i = 0; i < top_candidates.size; i++)
+            result_ptr[i] = top_candidates.data[i].id;
+        for (int i = top_candidates.size; i < query_K; i++)
+            result_ptr[i] = -1;
+
+        d_hops[query_id]       = hop_count;
+        d_dist_comps[query_id] = dist_comp_count;
     }
-    
-    // Write results to global memory from top_candidates
-    int* result_ptr = gpu_index.d_results + (long long)query_id * query_K;
-    for (int i = 0; i < query_K && i < top_candidates.size; i++) {
-        result_ptr[i] = top_candidates.data[i].id;
-    }
-    
-    // Fill remaining with -1 if fewer than K results found
-    for (int i = top_candidates.size; i < query_K; i++) {
-        result_ptr[i] = -1;
-    }
-    
-    // Write metrics
-    d_hops[query_id] = hop_count;
-    d_dist_comps[query_id] = dist_comp_count;
 }
