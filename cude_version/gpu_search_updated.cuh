@@ -2,6 +2,7 @@
 
 #include <cuda_runtime.h>
 #include <float.h>
+#include <stdint.h>
 #include "gpu_index.cuh"
 #include "gpu_visited.cuh"
 #include "gpu_heap.cuh"
@@ -53,12 +54,68 @@ __device__ int range_filter_gpu(GPUNode* d_nodes, int root_idx, int ql, int qr,
 
 // ============ Distance Calculation ============
 __device__ float L2Distance(const float *a, const float *b, int dim) {
+    const bool aligned16 = ((((uintptr_t)a | (uintptr_t)b) & 0xF) == 0);
+
+    if (aligned16 && (dim % 4 == 0)) {
+        const float4* a4 = reinterpret_cast<const float4*>(a);
+        const float4* b4 = reinterpret_cast<const float4*>(b);
+
+        float sum = 0.0f;
+        const int dim4 = dim >> 2;
+        for (int i = 0; i < dim4; i++) {
+            float4 av = a4[i];
+            float4 bv = b4[i];
+
+            float dx = av.x - bv.x;
+            float dy = av.y - bv.y;
+            float dz = av.z - bv.z;
+            float dw = av.w - bv.w;
+
+            sum += dx * dx + dy * dy + dz * dz + dw * dw;
+        }
+        return sum;
+    }
+
     float sum = 0.0f;
     for (int i = 0; i < dim; i++) {
         float diff = a[i] - b[i];
         sum += diff * diff;
     }
     return sum;  // Squared distance
+}
+
+// Partial L2 distance for cooperative groups of threads.
+// lane_in_group computes a strided subset and caller reduces across group.
+__device__ float L2DistancePartial(const float *a, const float *b, int dim,
+                                   int lane_in_group, int threads_in_group) {
+    const bool aligned16 = ((((uintptr_t)a | (uintptr_t)b) & 0xF) == 0);
+
+    if (aligned16 && (dim % 4 == 0)) {
+        const float4* a4 = reinterpret_cast<const float4*>(a);
+        const float4* b4 = reinterpret_cast<const float4*>(b);
+
+        float sum = 0.0f;
+        const int dim4 = dim >> 2;
+        for (int i = lane_in_group; i < dim4; i += threads_in_group) {
+            float4 av = a4[i];
+            float4 bv = b4[i];
+
+            float dx = av.x - bv.x;
+            float dy = av.y - bv.y;
+            float dz = av.z - bv.z;
+            float dw = av.w - bv.w;
+
+            sum += dx * dx + dy * dy + dz * dz + dw * dw;
+        }
+        return sum;
+    }
+
+    float sum = 0.0f;
+    for (int i = lane_in_group; i < dim; i += threads_in_group) {
+        float diff = a[i] - b[i];
+        sum += diff * diff;
+    }
+    return sum;
 }
 
 // Helper to get vector data for a given node ID
@@ -195,6 +252,17 @@ __device__ unsigned int xorshift32(unsigned int* state) {
 #define THREADS_PER_QUERY     32
 #define MAX_QUERIES_PER_BLOCK  8   // blockDim.x (256) / THREADS_PER_QUERY (32)
 
+// Distance parallelization mode (compile-time switch):
+// 1 = one thread computes one full distance (max neighbour parallelism)
+// 4 = four threads cooperate per distance (more per-distance parallelism)
+#define DIST_THREADS_PER_NEIGHBOR 4
+
+#if (THREADS_PER_QUERY % DIST_THREADS_PER_NEIGHBOR) != 0
+#error "DIST_THREADS_PER_NEIGHBOR must divide THREADS_PER_QUERY"
+#endif
+
+#define NEIGHBORS_PER_BATCH (THREADS_PER_QUERY / DIST_THREADS_PER_NEIGHBOR)
+
 __global__ void irange_search_kernel(
     GPUIndex gpu_index,
     GPUVisitedArray visited,
@@ -292,9 +360,9 @@ __global__ void irange_search_kernel(
     //     s_num_edges == -1 signals "stop".
     //  b) __syncwarp()
     //  c) All lanes break if s_num_edges == -1.
-    //  d) Lane i computes L2Distance for s_edges[i], stores in s_dists[i].
+    //  d) Threads compute distances in batches (configurable cooperative group size).
     //  e) __syncwarp()
-    //  f) Lane 0 reads s_dists[], marks visited, inserts into heaps.
+    //  f) Lane 0 reads batched s_dists[], marks visited, inserts into heaps.
 
     while (true) {
         // --- (a) Lane 0: advance one greedy step ---
@@ -328,42 +396,62 @@ __global__ void irange_search_kernel(
 
         const int num_edges = s_num_edges[warp_in_blk];
 
-        // --- (d) All 32 lanes compute their assigned neighbour's distance in parallel ---
-        if (lane_id < num_edges) {
-            int   neighbor_id   = s_edges[warp_in_blk][lane_id];
-            float neighbor_dist = L2Distance(
-                query_vector,
-                getVectorByID(neighbor_id, gpu_index.d_data_memory,
-                              gpu_index.d_size_data_per_element, gpu_index.d_offsetData),
-                dim);
-            s_dists[warp_in_blk][lane_id] = neighbor_dist;
-        }
+        // --- (d/e/f) Process edges in batches so mode=1 and mode=4 both work ---
+        for (int edge_base = 0; edge_base < num_edges; edge_base += NEIGHBORS_PER_BATCH) {
+            int edges_in_batch = num_edges - edge_base;
+            if (edges_in_batch > NEIGHBORS_PER_BATCH) edges_in_batch = NEIGHBORS_PER_BATCH;
 
-        // --- (e) Sync: lane 0 can now read all distances ---
-        __syncwarp();
+            const int neighbor_slot   = lane_id / DIST_THREADS_PER_NEIGHBOR;
+            const int lane_in_group   = lane_id % DIST_THREADS_PER_NEIGHBOR;
 
-        // --- (f) Lane 0: mark visited + heap insertion ---
-        if (lane_id == 0) {
-            for (int i = 0; i < num_edges; i++) {
-                int   neighbor_id   = s_edges[warp_in_blk][i];
-                float neighbor_dist = s_dists[warp_in_blk][i];
+            if (neighbor_slot < edges_in_batch) {
+                int neighbor_idx = edge_base + neighbor_slot;
+                int neighbor_id  = s_edges[warp_in_blk][neighbor_idx];
 
-                markVisited(visited, query_id, neighbor_id);
-                dist_comp_count++;
+                float partial = L2DistancePartial(
+                    query_vector,
+                    getVectorByID(neighbor_id, gpu_index.d_data_memory,
+                                  gpu_index.d_size_data_per_element, gpu_index.d_offsetData),
+                    dim,
+                    lane_in_group,
+                    DIST_THREADS_PER_NEIGHBOR);
 
-                if (top_candidates.size < SearchEF) {
-                    candidate_set.push(neighbor_dist, neighbor_id);
-                    top_candidates.push(neighbor_dist, neighbor_id);
-                    lowerBound = top_candidates.top().dist;
-                } else if (neighbor_dist < lowerBound) {
-                    candidate_set.push(neighbor_dist, neighbor_id);
-                    top_candidates.push(neighbor_dist, neighbor_id);
-                    top_candidates.pop();           // keep size at SearchEF
-                    lowerBound = top_candidates.top().dist;
+                for (int offset = DIST_THREADS_PER_NEIGHBOR / 2; offset > 0; offset >>= 1) {
+                    partial += __shfl_down_sync(0xffffffff, partial, offset, DIST_THREADS_PER_NEIGHBOR);
+                }
+
+                if (lane_in_group == 0) {
+                    s_dists[warp_in_blk][neighbor_slot] = partial;
                 }
             }
+
+            // Sync so lane 0 sees all distance results for this batch
+            __syncwarp();
+
+            if (lane_id == 0) {
+                for (int i = 0; i < edges_in_batch; i++) {
+                    int   neighbor_id   = s_edges[warp_in_blk][edge_base + i];
+                    float neighbor_dist = s_dists[warp_in_blk][i];
+
+                    markVisited(visited, query_id, neighbor_id);
+                    dist_comp_count++;
+
+                    if (top_candidates.size < SearchEF) {
+                        candidate_set.push(neighbor_dist, neighbor_id);
+                        top_candidates.push(neighbor_dist, neighbor_id);
+                        lowerBound = top_candidates.top().dist;
+                    } else if (neighbor_dist < lowerBound) {
+                        candidate_set.push(neighbor_dist, neighbor_id);
+                        top_candidates.push(neighbor_dist, neighbor_id);
+                        top_candidates.pop();           // keep size at SearchEF
+                        lowerBound = top_candidates.top().dist;
+                    }
+                }
+            }
+
+            // Ensure lane 0 finished reading batch distances before overwrite next batch
+            __syncwarp();
         }
-        // No extra __syncwarp needed: next iteration starts with lane-0 work
     }
 
     // =========================================================
