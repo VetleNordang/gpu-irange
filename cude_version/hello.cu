@@ -305,9 +305,9 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             cudaMemset(d_hops, 0, query_nb * sizeof(int));
             cudaMemset(d_dist_comps, 0, query_nb * sizeof(int));
             
-            int threads_per_block = 256;
-            int threads_per_query = 32;  // Number of threads to collaborate on each query
-            int queries_per_block = threads_per_block / threads_per_query;
+            int threads_per_block = THREADS_PER_QUERY;   // 128: 1 query per block
+            int threads_per_query = THREADS_PER_QUERY;   // 128 threads collaborate on each query
+            int queries_per_block = threads_per_block / threads_per_query;  // = 1
             int num_blocks = (query_nb + queries_per_block - 1) / queries_per_block;
             
             printf("Configuration: %d blocks × %d threads, Queries: %d, K: %d\n", 

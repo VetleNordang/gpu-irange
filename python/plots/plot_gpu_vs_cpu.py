@@ -5,7 +5,10 @@ Generates QPS comparison plots for each dataset and saves them in the respective
 """
 
 import os
+import argparse
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import glob
 from pathlib import Path
@@ -16,36 +19,50 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent / "exectable_data"
 # Dataset configurations
 DATASETS = [
     {
+        "key": "gist250k",
         "name": "GIST 250k",
         "path": "gist1m/250k",
         "cpu_pattern": "results_250k",
         "gpu_pattern": "results_250k_gpu"
     },
     {
+        "key": "gist500k",
         "name": "GIST 500k",
         "path": "gist1m/500k",
         "cpu_pattern": "results_500k",
         "gpu_pattern": "results_500k_gpu"
     },
     {
+        "key": "gist750k",
         "name": "GIST 750k",
         "path": "gist1m/750k",
         "cpu_pattern": "results_750k",
         "gpu_pattern": "results_750k_gpu"
     },
     {
+        "key": "gist1000k",
+        "name": "GIST 1000k",
+        "path": "gist1m/1000k",
+        "cpu_pattern": "results_1000k",
+        "gpu_pattern": "results_1000k_gpu"
+    },
+    {
+        "key": "video",
         "name": "Video (YouTube RGB)",
         "path": "video",
         "cpu_pattern": "results",
         "gpu_pattern": "results_gpu"
     },
     {
+        "key": "audi",
         "name": "Audi",
         "path": "audi",
         "cpu_pattern": "results",
         "gpu_pattern": "results_gpu"
     }
 ]
+
+TARGET_SUFFIXES = ["2", "5", "8"]
 
 
 def read_csv_files(result_dir, pattern, is_gpu=False):
@@ -95,43 +112,101 @@ def read_csv_files(result_dir, pattern, is_gpu=False):
     return combined_df
 
 
+def get_qps_series_by_suffix(df, suffix):
+    """Return QPS series by SearchEF for a suffix, or mixed over all suffixes."""
+    if suffix == "mixed":
+        return df.groupby('SearchEF')['QPS'].mean().sort_index()
+    suffix_df = df[df['Suffix'] == suffix]
+    if suffix_df.empty:
+        return None
+    return suffix_df.groupby('SearchEF')['QPS'].mean().sort_index()
+
+
 def plot_qps_comparison(cpu_df, gpu_df, dataset_name, output_path):
     """Create QPS comparison plot for GPU vs CPU."""
-    
-    # Group by SearchEF and calculate mean QPS across all suffixes
-    cpu_grouped = cpu_df.groupby('SearchEF')['QPS'].mean().sort_index()
-    gpu_grouped = gpu_df.groupby('SearchEF')['QPS'].mean().sort_index()
-    
-    # Also calculate recall for reference
-    cpu_recall = cpu_df.groupby('SearchEF')['Recall'].mean().sort_index()
-    gpu_recall = gpu_df.groupby('SearchEF')['Recall'].mean().sort_index()
+
+    suffixes_to_plot = TARGET_SUFFIXES + ["mixed"]
+    suffix_colors = {
+        "2": "tab:blue",
+        "5": "tab:orange",
+        "8": "tab:green",
+        "mixed": "tab:red",
+    }
     
     # Create figure with two subplots
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-    
-    # Plot 1: QPS comparison
-    ax1.plot(cpu_grouped.index, cpu_grouped.values, 'o-', label='CPU', linewidth=2, markersize=6)
-    ax1.plot(gpu_grouped.index, gpu_grouped.values, 's-', label='GPU', linewidth=2, markersize=6)
+
+    # Plot 1: QPS comparison by suffix (CPU + GPU)
+    plotted_any = False
+    for suffix in suffixes_to_plot:
+        cpu_series = get_qps_series_by_suffix(cpu_df, suffix)
+        gpu_series = get_qps_series_by_suffix(gpu_df, suffix)
+
+        if cpu_series is None or gpu_series is None:
+            print(f"  Warning: Missing data for suffix {suffix} in {dataset_name}, skipping this suffix")
+            continue
+
+        ax1.plot(
+            cpu_series.index,
+            cpu_series.values,
+            'o--',
+            color=suffix_colors[suffix],
+            label=f'CPU suffix {suffix}',
+            linewidth=2,
+            markersize=5,
+        )
+        ax1.plot(
+            gpu_series.index,
+            gpu_series.values,
+            's-',
+            color=suffix_colors[suffix],
+            label=f'GPU suffix {suffix}',
+            linewidth=2,
+            markersize=5,
+        )
+        plotted_any = True
+
     ax1.set_xlabel('SearchEF', fontsize=12)
     ax1.set_ylabel('QPS (Queries Per Second)', fontsize=12)
-    ax1.set_title(f'{dataset_name}: QPS Comparison', fontsize=14, fontweight='bold')
+    ax1.set_title(f'{dataset_name}: QPS by Suffix (2, 5, 8, mixed)', fontsize=14, fontweight='bold')
     ax1.legend(fontsize=11)
     ax1.grid(True, alpha=0.3)
     ax1.set_xscale('log')
     ax1.set_yscale('log')
-    
-    # Plot 2: Speedup (GPU/CPU)
-    common_ef = sorted(set(cpu_grouped.index) & set(gpu_grouped.index))
-    speedup = [gpu_grouped[ef] / cpu_grouped[ef] for ef in common_ef]
-    
-    ax2.plot(common_ef, speedup, 'o-', color='green', linewidth=2, markersize=6)
+
+    # Plot 2: Speedup (GPU/CPU) by suffix
+    speedup_by_suffix = {}
+    for suffix in suffixes_to_plot:
+        cpu_series = get_qps_series_by_suffix(cpu_df, suffix)
+        gpu_series = get_qps_series_by_suffix(gpu_df, suffix)
+        if cpu_series is None or gpu_series is None:
+            continue
+
+        common_ef = sorted(set(cpu_series.index) & set(gpu_series.index))
+        if not common_ef:
+            continue
+        speedup = [gpu_series[ef] / cpu_series[ef] for ef in common_ef]
+        speedup_by_suffix[suffix] = (common_ef, speedup)
+        ax2.plot(
+            common_ef,
+            speedup,
+            'o-',
+            color=suffix_colors[suffix],
+            linewidth=2,
+            markersize=5,
+            label=f'suffix {suffix}',
+        )
+
     ax2.axhline(y=1.0, color='red', linestyle='--', linewidth=1, label='No speedup')
     ax2.set_xlabel('SearchEF', fontsize=12)
     ax2.set_ylabel('Speedup (GPU QPS / CPU QPS)', fontsize=12)
-    ax2.set_title(f'{dataset_name}: GPU Speedup', fontsize=14, fontweight='bold')
+    ax2.set_title(f'{dataset_name}: GPU Speedup by Suffix', fontsize=14, fontweight='bold')
     ax2.legend(fontsize=11)
     ax2.grid(True, alpha=0.3)
     ax2.set_xscale('log')
+
+    if not plotted_any:
+        raise ValueError(f"No suffix series available for plotting in {dataset_name}")
     
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
@@ -139,13 +214,16 @@ def plot_qps_comparison(cpu_df, gpu_df, dataset_name, output_path):
     
     print(f"  ✓ Saved plot: {output_path}")
     
-    # Print summary statistics
-    avg_speedup = sum(speedup) / len(speedup)
-    max_speedup = max(speedup)
-    min_speedup = min(speedup)
+    # Print summary statistics for mixed, fallback to first available suffix
+    summary_suffix = "mixed" if "mixed" in speedup_by_suffix else next(iter(speedup_by_suffix.keys()))
+    summary_ef, summary_speedup = speedup_by_suffix[summary_suffix]
+    avg_speedup = sum(summary_speedup) / len(summary_speedup)
+    max_speedup = max(summary_speedup)
+    min_speedup = min(summary_speedup)
+    print(f"    Summary based on suffix {summary_suffix}")
     print(f"    Average speedup: {avg_speedup:.2f}x")
-    print(f"    Max speedup: {max_speedup:.2f}x (at EF={common_ef[speedup.index(max_speedup)]})")
-    print(f"    Min speedup: {min_speedup:.2f}x (at EF={common_ef[speedup.index(min_speedup)]})")
+    print(f"    Max speedup: {max_speedup:.2f}x (at EF={summary_ef[summary_speedup.index(max_speedup)]})")
+    print(f"    Min speedup: {min_speedup:.2f}x (at EF={summary_ef[summary_speedup.index(min_speedup)]})")
 
 
 def plot_recall_qps_tradeoff(cpu_df, gpu_df, dataset_name, output_path):
@@ -183,6 +261,18 @@ def plot_recall_qps_tradeoff(cpu_df, gpu_df, dataset_name, output_path):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Plot GPU vs CPU performance for one or all datasets")
+    parser.add_argument(
+        "--dataset",
+        choices=[d["key"] for d in DATASETS],
+        help="Dataset key to process (default: process all datasets)",
+    )
+    args = parser.parse_args()
+
+    datasets_to_process = DATASETS
+    if args.dataset:
+        datasets_to_process = [d for d in DATASETS if d["key"] == args.dataset]
+
     print("=" * 60)
     print("GPU vs CPU Performance Comparison")
     print("=" * 60)
@@ -191,7 +281,7 @@ def main():
     success_count = 0
     failure_count = 0
     
-    for dataset in DATASETS:
+    for dataset in datasets_to_process:
         print(f"Processing: {dataset['name']}")
         
         # Paths

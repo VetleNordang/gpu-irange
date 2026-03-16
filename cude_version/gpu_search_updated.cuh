@@ -242,20 +242,22 @@ __device__ unsigned int xorshift32(unsigned int* state) {
     return x;
 }
 
-// ============ Warp-cooperative Search Kernel ============
-// 32 threads (one warp) collaborate on every query:
+// ============ 128-thread Search Kernel (Option B) ============
+// 128 threads (4 warps) collaborate on every query:
 //   - Lane 0 owns the heap, SelectEdge, loop control, and result writing.
-//   - All 32 lanes compute neighbour distances in parallel each iteration.
-//   - __syncwarp() coordinates the two phases.
-// Hardcoded assumption: at most 32 neighbours per node (THREADS_PER_QUERY).
+//   - All 128 threads split each distance across DIST_THREADS_PER_NEIGHBOR=4 threads.
+//   - NEIGHBORS_PER_BATCH = 128/4 = 32, matching M=32 exactly (no idle lanes).
+//   - 1 query per block so __syncthreads() is always safe.
 
-#define THREADS_PER_QUERY     32
-#define MAX_QUERIES_PER_BLOCK  8   // blockDim.x (256) / THREADS_PER_QUERY (32)
+#define THREADS_PER_QUERY     128
+#define MAX_QUERIES_PER_BLOCK   1  // 1 query per block of 128 threads
 
 // Distance parallelization mode (compile-time switch):
 // 1 = one thread computes one full distance (max neighbour parallelism)
 // 4 = four threads cooperate per distance (more per-distance parallelism)
+#ifndef DIST_THREADS_PER_NEIGHBOR
 #define DIST_THREADS_PER_NEIGHBOR 4
+#endif
 
 #if (THREADS_PER_QUERY % DIST_THREADS_PER_NEIGHBOR) != 0
 #error "DIST_THREADS_PER_NEIGHBOR must divide THREADS_PER_QUERY"
@@ -276,20 +278,20 @@ __global__ void irange_search_kernel(
     size_t size_links_per_layer,
     unsigned long long seed
 ) {
-    // --- Warp / lane identity ---
+    // --- Thread identity ---
     const int lane_id           = threadIdx.x % THREADS_PER_QUERY;
-    const int warp_in_blk       = threadIdx.x / THREADS_PER_QUERY;  // 0..7
+    const int warp_in_blk       = threadIdx.x / THREADS_PER_QUERY;  // always 0 (1 query/block)
     const int queries_per_block = blockDim.x  / THREADS_PER_QUERY;
     const int query_id          = blockIdx.x  * queries_per_block + warp_in_blk;
 
     if (query_id >= query_nb) return;
 
-    // --- Shared memory: one slot per warp in the block ---
-    // s_edges    : neighbour IDs written by lane-0's SelectEdge call
-    // s_dists    : distances computed in parallel by all 32 lanes
-    // s_num_edges: edge count set by lane 0; -1 signals loop termination
-    __shared__ int   s_edges    [MAX_QUERIES_PER_BLOCK][THREADS_PER_QUERY];
-    __shared__ float s_dists    [MAX_QUERIES_PER_BLOCK][THREADS_PER_QUERY];
+    // --- Shared memory: one slot per query in the block (MAX_QUERIES_PER_BLOCK=1) ---
+    // s_edges    : up to NEIGHBORS_PER_BATCH (32) neighbour IDs from SelectEdge
+    // s_dists    : final distances written by lane-in-group==0 after reduction
+    // s_num_edges: set by lane 0; -1 signals loop termination
+    __shared__ int   s_edges    [MAX_QUERIES_PER_BLOCK][NEIGHBORS_PER_BATCH];
+    __shared__ float s_dists    [MAX_QUERIES_PER_BLOCK][NEIGHBORS_PER_BATCH];
     __shared__ int   s_num_edges[MAX_QUERIES_PER_BLOCK];
 
     // --- Per-query values readable by all lanes ---
@@ -347,10 +349,10 @@ __global__ void irange_search_kernel(
 
         lowerBound = (top_candidates.size > 0) ? top_candidates.top().dist : FLT_MAX;
 
-        // Pre-clear so the first __syncwarp is well-defined
+        // Pre-clear so the first __syncthreads is well-defined
         s_num_edges[warp_in_blk] = 0;
     }
-    __syncwarp();
+    __syncthreads();
 
     // =========================================================
     // Phase 2 - Greedy search with parallel distance computation
@@ -358,10 +360,10 @@ __global__ void irange_search_kernel(
     // Each iteration:
     //  a) Lane 0 checks termination; calls SelectEdge; writes s_edges / s_num_edges.
     //     s_num_edges == -1 signals "stop".
-    //  b) __syncwarp()
+    //  b) __syncthreads() — safe because only 1 query per block
     //  c) All lanes break if s_num_edges == -1.
-    //  d) Threads compute distances in batches (configurable cooperative group size).
-    //  e) __syncwarp()
+    //  d) Groups of DIST_THREADS_PER_NEIGHBOR compute distances cooperatively.
+    //  e) __syncthreads()
     //  f) Lane 0 reads batched s_dists[], marks visited, inserts into heaps.
 
     while (true) {
@@ -376,8 +378,8 @@ __global__ void irange_search_kernel(
                     s_num_edges[warp_in_blk] = -1;        // stop: below bound
                 } else {
                     candidate_set.pop();
-                    // SelectEdge writes directly into shared memory (at most 32 neighbours)
-                    SelectEdge_gpu(current.id, ql, qr, THREADS_PER_QUERY,
+                    // SelectEdge writes directly into shared memory (at most NEIGHBORS_PER_BATCH=32)
+                    SelectEdge_gpu(current.id, ql, qr, NEIGHBORS_PER_BATCH,
                                    gpu_index.d_segment_tree.d_nodes, 0,
                                    gpu_index.d_data_memory,
                                    gpu_index.d_size_data_per_element,
@@ -388,8 +390,8 @@ __global__ void irange_search_kernel(
             }
         }
 
-        // --- (b) Sync: all lanes can now read s_num_edges / s_edges ---
-        __syncwarp();
+        // --- (b) Sync: all 128 threads can now read s_num_edges / s_edges ---
+        __syncthreads();
 
         // --- (c) Termination check (all lanes) ---
         if (s_num_edges[warp_in_blk] == -1) break;
@@ -426,7 +428,7 @@ __global__ void irange_search_kernel(
             }
 
             // Sync so lane 0 sees all distance results for this batch
-            __syncwarp();
+            __syncthreads();
 
             if (lane_id == 0) {
                 for (int i = 0; i < edges_in_batch; i++) {
@@ -450,7 +452,7 @@ __global__ void irange_search_kernel(
             }
 
             // Ensure lane 0 finished reading batch distances before overwrite next batch
-            __syncwarp();
+            __syncthreads();
         }
     }
 
