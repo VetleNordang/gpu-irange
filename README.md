@@ -1,6 +1,11 @@
 # iRangeGraph
 This repo is the implementation of [iRangeGraph: Improvising Range-dedicated Graphs for Range-filtering Nearest Neighbor Search](https://arxiv.org/abs/2409.02571)
 
+## Additional Guides
+
+- [FAISS Product Quantization (PQ) Integration Guide](README_FAISS_PQ.md)
+- [CPU-First PQ Setup Guide](README_PQ_CPU_FIRST.md)
+
 
 ## Quick Start
 

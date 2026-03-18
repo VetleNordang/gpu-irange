@@ -7,6 +7,18 @@
 #include <bitset>
 #include <cuda_runtime.h>
 #include <omp.h>
+#include <limits>
+#include <faiss/impl/ProductQuantizer.h>
+
+// PQ Codes Blob structure
+struct PQCodesBlob {
+    int32_t n = 0;
+    int32_t d = 0;
+    int32_t M = 0;
+    int32_t nbits = 0;
+    int32_t code_size = 0;
+    std::vector<uint8_t> codes;
+};
 
 namespace iRangeGraph
 {
@@ -38,6 +50,14 @@ namespace iRangeGraph
         size_t metric_hops{0};
 
         int prefetch_lines{0};
+
+        // PQ compressed codes members
+        std::vector<uint8_t> compressed_codes_;
+        int pq_code_size_{0};  // Size of each compressed code
+        int pq_M_{0};          // Number of subquantizers
+        int pq_nbits_{0};      // Bits per centroid
+        bool use_pq_{false};   // Flag to use PQ codes
+        faiss::ProductQuantizer* pq_model_{nullptr};  // Pointer to PQ codebook
 
         iRangeGraph_Search(std::string vectorfilename, std::string edgefilename, DataLoader *store, int M) : storage(store)
         {
@@ -100,6 +120,49 @@ namespace iRangeGraph
         {
             free(data_memory_);
             data_memory_ = nullptr;
+        }
+
+        // Load compressed PQ codes from blob
+        void load_pq_codes(const std::vector<uint8_t>& codes, int code_size, int M, int nbits,
+                           faiss::ProductQuantizer* pq_model = nullptr)
+        {
+            compressed_codes_ = codes;
+            pq_code_size_ = code_size;
+            pq_M_ = M;
+            pq_nbits_ = nbits;
+            pq_model_ = pq_model;
+            use_pq_ = true;
+            std::cout << "Loaded PQ codes: " << max_elements_ << " vectors, code_size=" << code_size << std::endl;
+        }
+
+        // Compute distance between raw query vector and compressed DB vector using PQ codebook
+        // This iterates through each subspace, finds the centroid for that subspace from the code,
+        // and computes L2 distance between query subvector and centroid subvector
+        float compute_pq_distance(const float* query_vector, int data_id) const
+        {
+            if (!pq_model_ || data_id < 0 || data_id >= max_elements_)
+                return std::numeric_limits<float>::max();
+            
+            float distance = 0.0f;
+            const uint8_t* data_code = compressed_codes_.data() + data_id * pq_code_size_;
+            
+            // Iterate through each subspace
+            for (int m = 0; m < pq_M_; ++m) {
+                // Get centroid index for this subspace from the compressed code
+                uint8_t centroid_idx = data_code[m];
+                
+                // Get pointers to query subvector and centroid subvector
+                const float* query_m = query_vector + m * pq_model_->dsub;
+                const float* centroid_m = pq_model_->get_centroids(m, 0) + centroid_idx * pq_model_->dsub;
+                
+                // Compute L2 distance in this subspace
+                for (size_t d = 0; d < pq_model_->dsub; ++d) {
+                    float diff = query_m[d] - centroid_m[d];
+                    distance += diff * diff;
+                }
+            }
+            
+            return distance;
         }
 
         __device__ float L2Distance(const float *a, const float *b, size_t dim);
@@ -191,13 +254,20 @@ namespace iRangeGraph
             std::priority_queue<PFI> top_candidates;
             searcher::Bitset<uint64_t> visited_set(max_elements_);
 
+            const float* query_vector = static_cast<const float*>(query_data);
+
             for (auto u : filterednodes)
             {
                 std::uniform_int_distribution<int> u_start(u->lbound, u->rbound);
                 int pid = u_start(e);
                 visited_set.set(pid);
-                char *ep_data = getDataByInternalId(pid);
-                float dis = fstdistfunc_(query_data, ep_data, dist_func_param_);
+                float dis;
+                if (use_pq_) {
+                    dis = compute_pq_distance(query_vector, pid);
+                } else {
+                    char *ep_data = getDataByInternalId(pid);
+                    dis = fstdistfunc_(query_data, ep_data, dist_func_param_);
+                }
                 candidate_set.emplace(dis, pid);
                 top_candidates.emplace(dis, pid);
             }
@@ -220,7 +290,9 @@ namespace iRangeGraph
                 int num_edges = selected_edges.size();
                 for (int i = 0; i < std::min(num_edges, 3); ++i)
                 {
-                    memory::mem_prefetch_L1(getDataByInternalId(selected_edges[i]), this->prefetch_lines);
+                    if (!use_pq_) {
+                        memory::mem_prefetch_L1(getDataByInternalId(selected_edges[i]), this->prefetch_lines);
+                    }
                 }
                 for (int i = 0; i < num_edges; ++i)
                 {
@@ -229,8 +301,14 @@ namespace iRangeGraph
                     if (visited_set.get(neighbor_id))
                         continue;
                     visited_set.set(neighbor_id);
-                    char *neighbor_data = getDataByInternalId(neighbor_id);
-                    float dis = fstdistfunc_(query_data, neighbor_data, dist_func_param_);
+                    
+                    float dis;
+                    if (use_pq_) {
+                        dis = compute_pq_distance(query_vector, neighbor_id);
+                    } else {
+                        char *neighbor_data = getDataByInternalId(neighbor_id);
+                        dis = fstdistfunc_(query_data, neighbor_data, dist_func_param_);
+                    }
                     
                     #pragma omp atomic
                     ++metric_distance_computations;
@@ -327,5 +405,6 @@ namespace iRangeGraph
                 outfile.close();
             }
         }
+
     };
 }

@@ -8,6 +8,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     gdb \
     python3 \
     python3-pip \
+    libfaiss-dev \
+    python3-faiss \
     && rm -rf /var/lib/apt/lists/*
 
 
