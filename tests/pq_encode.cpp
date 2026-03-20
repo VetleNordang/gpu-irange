@@ -145,6 +145,55 @@ PQCodesBlob load_pq_codes(const std::string& path) {
     return blob;
 }
 
+void TrainAndCompressPQ(const std::unordered_map<std::string, std::string>& paths, int M) {
+    std::cout << "\n=== Training PQ Model and Compressing Data ===" << std::endl;
+
+    // Load data
+    std::cout << "Loading data: " << paths.at("data_vector_comp") << std::endl;
+    DenseMatrix data = load_irange_bin(paths.at("data_vector_comp"));
+    std::cout << "Loaded " << data.n << " vectors, dim=" << data.d << std::endl;
+
+    // Validate dimension
+    if (data.d % M != 0) {
+        throw std::runtime_error("dimension must be divisible by M for ProductQuantizer");
+    }
+
+    // Parse nbits
+    if (!paths.count("nbits") || paths.at("nbits").empty()) {
+        throw std::runtime_error("missing --nbits argument");
+    }
+    int nbits = std::stoi(paths.at("nbits"));
+    if (nbits <= 0 || nbits > 16) {
+        throw std::runtime_error("--nbits must be in the range [1, 16]");
+    }
+
+    std::cout << "Training PQ with " << data.n << " vectors, M=" << M << ", nbits=" << nbits << std::endl;
+
+    faiss::ProductQuantizer pq(data.d, M, nbits);
+    pq.verbose = true;
+    pq.train(data.n, data.values.data());
+
+    // Save PQ model
+    ensure_parent_dir(paths.at("pq_model_out"));
+    faiss::write_ProductQuantizer(&pq, paths.at("pq_model_out").c_str());
+    std::cout << "Saved PQ model to: " << paths.at("pq_model_out") << std::endl;
+
+    // Compress data vectors
+    std::vector<uint8_t> data_codes(static_cast<size_t>(data.n) * pq.code_size);
+    pq.compute_codes(data.values.data(), data_codes.data(), data.n);
+    save_pq_codes(paths.at("pq_codes_out"), data.n, data.d, M, nbits,
+                  static_cast<int32_t>(pq.code_size), data_codes);
+    std::cout << "Saved data PQ codes to: " << paths.at("pq_codes_out") << std::endl;
+
+    const double raw_bytes = static_cast<double>(data.n) * data.d * sizeof(float);
+    const double pq_bytes = static_cast<double>(data_codes.size());
+    std::cout << "Data compression: " << (raw_bytes / pq_bytes) << "x ("
+              << raw_bytes / (1024.0 * 1024.0) << " MB -> "
+              << pq_bytes / (1024.0 * 1024.0) << " MB)" << std::endl;
+
+    std::cout << "=== PQ Training and Compression Complete ===" << std::endl;
+}
+
 void InitializeIndexWithCompressedData(
         iRangeGraph::iRangeGraph_Search<float>& index,
         CompressedIndexData& compressed_data) {
@@ -183,7 +232,8 @@ inline PQCodesBlob CompressedIndexData::LoadPQCodes(const std::string& path, con
 
 int main(int argc, char** argv) {
     try {
-        int M = 32;
+        int M_graf_edges = 32;
+        int M_compression_spaces = 16;
         int query_K = 10;
 
         for (int i = 0; i < argc; i++)
@@ -201,17 +251,16 @@ int main(int argc, char** argv) {
                 paths["index"] = argv[i + 1];
             if (arg == "--result_saveprefix")
                 paths["result_saveprefix"] = argv[i + 1];
-            if (arg == "--M")
-                M = std::stoi(argv[i + 1]);
+            if (arg == "--M_edges_graf")
+                M_graf_edges = std::stoi(argv[i + 1]);
             if (arg == "--pq_codes_out")
                 paths["pq_codes_out"] = argv[i + 1];
             if (arg == "--pq_model_out")
                 paths["pq_model_out"] = argv[i + 1];
             if (arg == "--nbits")
                 paths["nbits"] = argv[i + 1];
-            if (arg == "--train_size")
-                paths["train_size"] = argv[i + 1];
-            
+            if (arg == "--M_compression_spaces")
+                paths["M_compression_spaces"] = argv[i + 1];
         }
 
         const bool model_exists = std::filesystem::exists(paths["pq_model_out"]);
@@ -219,57 +268,17 @@ int main(int argc, char** argv) {
         const bool query_requested = !paths["query_vector"].empty();
         const bool query_codes_exist = !query_requested || std::filesystem::exists(paths["query_codes_out"]);
 
-        // if (!(model_exists && data_codes_exist && query_codes_exist)) {
-        //     std::cout << "Loading data: " << paths["data_vector_comp"] << std::endl;
-        //     DenseMatrix data = load_irange_bin(paths["data_vector_comp"]);
-        //     std::cout << "Loaded " << data.n << " vectors, dim=" << data.d << std::endl;
-    
-        //     if (data.d % M != 0) {
-        //         throw std::runtime_error("dimension must be divisible by M for ProductQuantizer");
-        //     }
-        //     if (paths["nbits"].empty()) {
-        //         throw std::runtime_error("missing --nbits argument");
-        //     }
-        //     int nbits = std::stoi(paths["nbits"]);
-        //     if (nbits <= 0 || nbits > 16) {
-        //         throw std::runtime_error("--nbits must be in the range [1, 16]");
-        //     }
+        if (!(model_exists && data_codes_exist && query_codes_exist)) {
+            if (paths.count("M_compression_spaces")) {
+                M_compression_spaces = std::stoi(paths["M_compression_spaces"]);
+                if (M_compression_spaces <= 0) {
+                    throw std::runtime_error("--M_compression_spaces must be above 0");
+                }
+            }
+            TrainAndCompressPQ(paths, M_compression_spaces);
+        }
 
-        //     int train_size = paths["train_size"].empty() ? 100000 : std::stoi(paths["train_size"]);
-        //     std::vector<float> train_data = sample_training_vectors(data, train_size);
-        //     const int train_n = static_cast<int>(train_data.size() / data.d);
-        //     std::cout << "Training PQ with " << train_n << " vectors, M=" << M << ", nbits=" << nbits << std::endl;
     
-        //     faiss::ProductQuantizer pq(data.d, M, nbits);
-        //     pq.verbose = true;
-        //     pq.train(train_n, train_data.data());
-    
-        //     ensure_parent_dir(paths["pq_model_out"]);
-        //     faiss::write_ProductQuantizer(&pq, paths["pq_model_out"].c_str());
-        //     std::cout << "Saved PQ model to: " << paths["pq_model_out"] << std::endl;
-    
-        //     std::vector<uint8_t> data_codes(static_cast<size_t>(data.n) * pq.code_size);
-        //     pq.compute_codes(data.values.data(), data_codes.data(), data.n);
-        //     save_pq_codes(paths["pq_codes_out"], data.n, data.d, M, nbits, static_cast<int32_t>(pq.code_size), data_codes);
-        //     std::cout << "Saved data PQ codes to: " << paths["pq_codes_out"] << std::endl;
-    
-        //     const double raw_bytes = static_cast<double>(data.n) * data.d * sizeof(float);
-        //     const double pq_bytes = static_cast<double>(data_codes.size());
-    
-        //     if (!paths["query_vector"].empty()) {
-        //         std::cout << "Loading queries: " << paths["query_vector"] << std::endl;
-        //         DenseMatrix queries = load_irange_bin(paths["query_vector"]);
-        //         if (queries.d != data.d) {
-        //             throw std::runtime_error("query dimension does not match data dimension");
-        //         }
-    
-        //         std::vector<uint8_t> query_codes(static_cast<size_t>(queries.n) * pq.code_size);
-        //         pq.compute_codes(queries.values.data(), query_codes.data(), queries.n);
-        //         save_pq_codes(paths["query_codes_out"], queries.n, queries.d, M, nbits, static_cast<int32_t>(pq.code_size), query_codes);
-        //         std::cout << "Saved query PQ codes to: " << paths["query_codes_out"] << std::endl;
-        //     }
-        // }
-
         std::cout << "Loading compressed index data..." << std::endl;
         
         // Load PQ model (codebook) and compressed DB codes
@@ -283,7 +292,7 @@ int main(int argc, char** argv) {
         storage.LoadGroundtruth(paths["groundtruth_saveprefix"]);
 
         // Create index with both raw data and PQ codes
-        iRangeGraph::iRangeGraph_Search<float> index(paths["data_vector_comp"], paths["index"], &storage, M);
+        iRangeGraph::iRangeGraph_Search<float> index(paths["data_vector_comp"], paths["index"], &storage, M_graf_edges);
         
         // Set up the index with compressed DB vectors and codebook
         InitializeIndexWithCompressedData(index, compressed_data);
@@ -291,7 +300,7 @@ int main(int argc, char** argv) {
         // searchefs can be adjusted
         std::vector<int> SearchEF = {1700, 1400, 1100, 1000, 900, 800, 700, 600, 500, 400, 300, 250, 200, 180, 160, 140, 120, 100, 90, 80, 70, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10};
         index.use_pq_ = true; // Enable PQ-based distance computation
-        index.search(SearchEF, paths["result_saveprefix"], M);
+        index.search(SearchEF, paths["result_saveprefix"], M_graf_edges);
 
         return 0;
     } catch (const std::exception& e) {

@@ -135,6 +135,20 @@ namespace iRangeGraph
             std::cout << "Loaded PQ codes: " << max_elements_ << " vectors, code_size=" << code_size << std::endl;
         }
 
+        // Helper: Extract nbits bits from byte array at given bit offset
+        inline uint32_t extract_centroid_idx(const uint8_t* data, int subspace_idx, int nbits) const
+        {
+            int bit_offset = subspace_idx * nbits;
+            uint32_t result = 0;
+            for (int i = 0; i < nbits; ++i) {
+                int byte_idx = (bit_offset + i) / 8;
+                int bit_idx = (bit_offset + i) % 8;
+                uint8_t bit = (data[byte_idx] >> bit_idx) & 1;
+                result |= (bit << i);
+            }
+            return result;
+        }
+
         // Compute distance between raw query vector and compressed DB vector using PQ codebook
         // This iterates through each subspace, finds the centroid for that subspace from the code,
         // and computes L2 distance between query subvector and centroid subvector
@@ -148,8 +162,8 @@ namespace iRangeGraph
             
             // Iterate through each subspace
             for (int m = 0; m < pq_M_; ++m) {
-                // Get centroid index for this subspace from the compressed code
-                uint8_t centroid_idx = data_code[m];
+                // Extract centroid index for this subspace (handles nbits != 8)
+                uint32_t centroid_idx = extract_centroid_idx(data_code, m, pq_nbits_);
                 
                 // Get pointers to query subvector and centroid subvector
                 const float* query_m = query_vector + m * pq_model_->dsub;

@@ -34,7 +34,7 @@ iRangeGraph_Search(std::string vectorfilename, std::string edgefilename,
 - **M**: Number of subspaces for PQ decomposition
 
 #### Key Member Variables (Lines 60-61)
-```cpp
+```cp
 uint8_t* data_code{nullptr};        // Compressed codes: M bytes per vector
 faiss::ProductQuantizer* pq_model_{nullptr};  // FAISS codebook with centroids
 ```
