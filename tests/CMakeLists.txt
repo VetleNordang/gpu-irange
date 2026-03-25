@@ -1,4 +1,5 @@
 find_package(CUDA REQUIRED)
+enable_language(CUDA)
 
 add_executable(buildindex buildindex.cpp)
 target_link_libraries(buildindex ${CUDA_LIBRARIES})
@@ -16,7 +17,6 @@ if(ENABLE_FAISS)
 	find_package(LAPACK REQUIRED)
 	find_package(OpenMP REQUIRED)
 
-	if(FAISS_INCLUDE_DIR AND FAISS_LIBRARY)
 		add_executable(pq_encode pq_encode.cpp)
 		target_include_directories(pq_encode PRIVATE ${FAISS_INCLUDE_DIR})
 		target_link_libraries(pq_encode PRIVATE ${FAISS_LIBRARY} ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES} OpenMP::OpenMP_CXX ${CUDA_LIBRARIES})
@@ -25,8 +25,15 @@ if(ENABLE_FAISS)
 		target_include_directories(pq_manual_distance PRIVATE ${FAISS_INCLUDE_DIR})
 		target_link_libraries(pq_manual_distance PRIVATE ${FAISS_LIBRARY} ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES} OpenMP::OpenMP_CXX)
 
-		message(STATUS "FAISS support enabled: pq_encode and pq_manual_distance targets available")
-	else()
-		message(WARNING "ENABLE_FAISS=ON but FAISS headers/library were not found; pq targets will not be built")
-	endif()
+		# TODO: gpu_pq_encode and gpu_irangegraph_search to be added later
+		# add_executable(gpu_pq_encode gpu_pq_encode.cu)
+		# target_include_directories(gpu_pq_encode PRIVATE ${FAISS_INCLUDE_DIR} ${PROJECT_SOURCE_DIR}/cude_version)
+		# target_link_libraries(gpu_pq_encode PRIVATE ${FAISS_LIBRARY} ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES} OpenMP::OpenMP_CXX ${CUDA_LIBRARIES})
+		# set_target_properties(gpu_pq_encode PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+		
+		# GPU iRangeGraph Greedy Search (based on hello_clean.cu from cude_version)
+		# add_executable(gpu_irangegraph_search gpu_irangegraph_search.cu)
+		# target_include_directories(gpu_irangegraph_search PRIVATE ${PROJECT_SOURCE_DIR}/cude_version)
+		# target_link_libraries(gpu_irangegraph_search PRIVATE ${CUDA_LIBRARIES})
+		# set_target_properties(gpu_irangegraph_search PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 endif()

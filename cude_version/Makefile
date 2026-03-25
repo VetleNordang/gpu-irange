@@ -7,8 +7,17 @@ OPT_FLAGS = -O3 --use_fast_math -lineinfo -DDIST_THREADS_PER_NEIGHBOR=$(DIST_THR
 BUILD_DIR = build
 TARGET = $(BUILD_DIR)/hello
 OPT_TARGET = $(BUILD_DIR)/optimized_test
+PQ_TARGET = $(BUILD_DIR)/hello_pq
 SOURCE = hello.cu
+PQ_SOURCE = hello_pq.cu
 HEADERS = gpu_search.cuh gpu_search_updated.cuh ../include/iRG_search.h ../include/utils.h
+
+# FAISS support
+ENABLE_FAISS ?= 1
+ifeq ($(ENABLE_FAISS),1)
+	FAISS_CFLAGS = -DENABLE_FAISS
+	FAISS_LDFLAGS = -lfaiss -lgomp -lblas -llapack
+endif
 
 # ARGS = --data_path $(PROJECT_ROOT)/exectable_data/video/youtube_rgb_sorted.bin \
 #        --query_path $(PROJECT_ROOT)/exectable_data/video/youtube_rgb_query.bin \
@@ -61,19 +70,27 @@ ARGS = --data_path $(PROJECT_ROOT)/exectable_data/gist1m/1000k/gist_base_1000k.b
 
 all: $(TARGET)
 
+pq_target: $(PQ_TARGET)
+
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 $(TARGET): $(BUILD_DIR) $(SOURCE) $(HEADERS)
-	$(NVCC) $(ARCH) $(INCLUDE) $(SOURCE) -o $(TARGET)
+	$(NVCC) $(ARCH) $(INCLUDE) $(FAISS_CFLAGS) -Xcompiler "-DENABLE_FAISS,-fopenmp" -Xcompiler "-lgomp" $(SOURCE) -o $(TARGET) -lgomp -lblas -llapack -lfaiss
+
+$(PQ_TARGET): $(BUILD_DIR) $(PQ_SOURCE) $(HEADERS)
+	$(NVCC) $(ARCH) $(INCLUDE) $(FAISS_CFLAGS) -Xcompiler "-DENABLE_FAISS,-fopenmp" -Xcompiler "-lgomp" $(PQ_SOURCE) -o $(PQ_TARGET) -lgomp -lblas -llapack -lfaiss
 
 optimized_test: $(OPT_TARGET)
 
 $(OPT_TARGET): $(BUILD_DIR) $(SOURCE) $(HEADERS)
-	$(NVCC) $(ARCH) $(OPT_FLAGS) $(INCLUDE) $(SOURCE) -o $(OPT_TARGET)
+	$(NVCC) $(ARCH) $(OPT_FLAGS) $(INCLUDE) $(FAISS_CFLAGS) -Xcompiler "$(FAISS_CFLAGS),-fopenmp,-lgomp" $(SOURCE) -o $(OPT_TARGET) -lgomp -lblas -llapack -lfaiss
 
 run: $(TARGET)
 	$(TARGET) $(ARGS)
+
+run_pq: $(PQ_TARGET)
+	$(PQ_TARGET) $(ARGS)
 
 run_optimized_test:
 	$(MAKE) optimized_test DIST_THREADS_PER_NEIGHBOR=$(DIST_THREADS_PER_NEIGHBOR) -B
@@ -82,4 +99,4 @@ run_optimized_test:
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: all run optimized_test run_optimized_test clean
+.PHONY: all pq_target run run_pq optimized_test run_optimized_test clean

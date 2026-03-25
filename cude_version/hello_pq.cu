@@ -1,84 +1,90 @@
-// This program computer the sum of two N-element vectors using unified memory
-// By: Nick from CoffeeBeforeArch
+// GPU-accelerated iRangeGraph Search with PQ compression
+// Using CUDA for greedy graph traversal with all SearchEF values
+// PQ distances replace L2 for distance computation
 
 #include <stdio.h>
 #include <cassert>
 #include <iostream>
 #include <fstream>
-#include <algorithm>
 #include <chrono>
+#include <algorithm>
 #include <map>
 #include <tuple>
+#include <memory>
 #include "iRG_search.h"
 #include <curand_kernel.h>
 #include "gpu_index.cuh"
 #include "gpu_heap.cuh"
 #include "gpu_visited.cuh"
-#include "gpu_search.cuh"
+#include "gpu_search_updated.cuh"
+#include <faiss/impl/ProductQuantizer.h>
+#include <faiss/index_io.h>
 
 
 const int query_K = 10;
 int M;
 
+#define THREADS_PER_QUERY_VAL 128
+#define MAX_THREADS_PER_BLOCK 2000
+
 using std::cout;
 std::unordered_map<std::string, std::string> paths;
-
-// Test kernel to demonstrate visited array
-__global__ void test_visited_array(GPUVisitedArray visited) {
-    int query_id = threadIdx.x;  // Each thread is a different query
-    
-    if (query_id < visited.num_queries) {
-        printf("\n=== Query %d Testing Visited Array ===\n", query_id);
-        
-        // Simulate visiting some nodes
-        int nodes_to_visit[] = {10, 25, 50, 100, 10};  // Note: 10 appears twice!
-        
-        for (int i = 0; i < 5; i++) {
-            int node = nodes_to_visit[i];
-            
-            // Check if already visited
-            if (isVisited(visited, query_id, node)) {
-                printf("  Node %d: Already visited! (skipping)\n", node);
-            } else {
-                printf("  Node %d: First time visiting (marking as visited)\n", node);
-                markVisited(visited, query_id, node);
-            }
-        }
-        
-        printf("=== Query %d Complete ===\n", query_id);
-    }
-}
-
-// Random number generation
-__device__ unsigned int hash_random(unsigned int x) {
-    x = ((x >> 16) ^ x) * 0x45d9f3b;
-    x = ((x >> 16) ^ x) * 0x45d9f3b;
-    x = (x >> 16) ^ x;
-    return x;
-}
-
-__device__ int random_in_range(unsigned int seed, int lbound, int rbound) {
-    if (lbound >= rbound) return lbound;
-    unsigned int h = hash_random(seed);
-    return lbound + (h % (rbound - lbound + 1));
-}
 
 
 void init()
 {
-    // data vectors should be sorted by the attribute values in ascending order
     paths["data_vector"] = "";
-
     paths["query_vector"] = "";
-    // the path of document where range files are saved
-    paths["range_saveprefix"] = "";
-    // the path of document where groundtruth files are saved
-    paths["groundtruth_saveprefix"] = "";
-    // the path where index file is saved
     paths["index"] = "";
-    // the path of document where search result files are saved
     paths["result_saveprefix"] = "";
-    // M is the maximum out-degree same as index build
+    paths["range_saveprefix"] = "";
+    paths["groundtruth_saveprefix"] = "";
+    paths["pq_model"] = "";
+    paths["pq_codes"] = "";
+}
+
+// Load PQ model from Faiss
+std::unique_ptr<faiss::ProductQuantizer> load_pq_model(const std::string& model_path) {
+    printf("Loading PQ model from: %s\n", model_path.c_str());
+    std::unique_ptr<faiss::ProductQuantizer> pq(faiss::read_ProductQuantizer(model_path.c_str()));
+    if (!pq) {
+        throw std::runtime_error("Failed to load PQ model from " + model_path);
+    }
+    printf("✓ PQ model loaded: d=%d, M=%d, nbits=%d, ksub=%d, dsub=%d, code_size=%d\n",
+           pq->d, pq->M, pq->nbits, pq->ksub, pq->dsub, pq->code_size);
+    return pq;
+}
+
+// Load PQ codes blob (using the definition from iRG_search.h)
+PQCodesBlob load_pq_codes(const std::string& codes_path) {
+    printf("Loading PQ codes from: %s\n", codes_path.c_str());
+    std::ifstream in(codes_path, std::ios::binary);
+    if (!in.is_open()) {
+        throw std::runtime_error("Cannot open " + codes_path);
+    }
+    
+    PQCodesBlob blob;
+    in.read(reinterpret_cast<char*>(&blob.n), sizeof(int));
+    in.read(reinterpret_cast<char*>(&blob.d), sizeof(int));
+    in.read(reinterpret_cast<char*>(&blob.M), sizeof(int));
+    in.read(reinterpret_cast<char*>(&blob.nbits), sizeof(int));
+    in.read(reinterpret_cast<char*>(&blob.code_size), sizeof(int));
+    
+    if (!in || blob.n <= 0 || blob.d <= 0 || blob.M <= 0) {
+        throw std::runtime_error("Invalid PQ code header in " + codes_path);
+    }
+    
+    const size_t payload_size = (size_t)blob.n * blob.code_size;
+    blob.codes.resize(payload_size);
+    in.read(reinterpret_cast<char*>(blob.codes.data()), payload_size);
+    
+    if (!in) {
+        throw std::runtime_error("Failed to read PQ codes from " + codes_path);
+    }
+    
+    printf("✓ PQ codes loaded: n=%d, d=%d, M=%d, code_size=%d\n", 
+           blob.n, blob.d, blob.M, blob.code_size);
+    return blob;
 }
 
 void Generate(iRangeGraph::DataLoader &storage)
@@ -89,8 +95,6 @@ void Generate(iRangeGraph::DataLoader &storage)
     storage.LoadQueryRange(paths["range_saveprefix"]);
     generator.GenerateGroundtruth(paths["groundtruth_saveprefix"], storage);
 }
-
- 
 
 void load_index_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &gpu_index) {
     int dimension = index.storage->Dim;
@@ -194,6 +198,7 @@ void load_queries_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex
     for (auto range : index.storage->query_range) {
         suffix_keys.push_back(range.first);
     }
+
     size_t query_ranges_size = (size_t)query_nb * 2 * sizeof(int) * suffix_keys.size();
     err = cudaMalloc((void**)&gpu_index.d_query_range, query_ranges_size);
     if (err != cudaSuccess) {
@@ -241,7 +246,85 @@ int* make_result_buffer_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GP
 
 }
 
-// CPU function to prepare data and launch GPU kernel
+void load_pq_model_to_gpu(GPUIndex &gpu_index, faiss::ProductQuantizer* pq_model) {
+    gpu_index.pq_dsub = pq_model->dsub;
+    gpu_index.pq_ksub = pq_model->ksub;
+    gpu_index.pq_M = pq_model->M;
+    gpu_index.pq_nbits = pq_model->nbits;
+    gpu_index.pq_code_size = pq_model->code_size;
+    gpu_index.use_pq = true;
+
+    size_t centroids_size = (size_t)pq_model->M * pq_model->ksub * pq_model->dsub * sizeof(float);
+    cudaError_t err = cudaMalloc((void**)&gpu_index.d_centroids, centroids_size);
+    if (err != cudaSuccess) {
+        printf("CudaMalloc failed for PQ centroids: %s\n", cudaGetErrorString(err));
+        return;
+    }
+
+    err = cudaMemcpy(gpu_index.d_centroids, pq_model->centroids.data(), centroids_size, cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        printf("CudaMemcpy failed for PQ centroids: %s\n", cudaGetErrorString(err));
+        cudaFree(gpu_index.d_centroids);
+        return;
+    }
+    
+    printf("✓ Loaded PQ model to GPU: M=%d, nbits=%d, dsub=%d, ksub=%d\n", 
+           gpu_index.pq_M, gpu_index.pq_nbits, gpu_index.pq_dsub, gpu_index.pq_ksub);
+}
+
+void load_pq_codes_to_gpu(GPUIndex &gpu_index, const std::vector<uint8_t>& pq_codes) {
+    gpu_index.pq_codes_cpu = pq_codes;  // Keep a copy on CPU for reference
+
+    gpu_index.gpu_codes_size = (size_t)pq_codes.size() * sizeof(uint8_t);
+    cudaError_t err = cudaMalloc((void**)&gpu_index.d_compressed_codes, gpu_index.gpu_codes_size);
+    if (err != cudaSuccess) {
+        printf("CudaMalloc failed for PQ codes: %s\n", cudaGetErrorString(err));
+        return;
+    }
+
+    err = cudaMemcpy(gpu_index.d_compressed_codes, pq_codes.data(), gpu_index.gpu_codes_size, cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        printf("CudaMemcpy failed for PQ codes: %s\n", cudaGetErrorString(err));
+        cudaFree(gpu_index.d_compressed_codes);
+        return;
+    }
+    
+    printf("✓ Loaded %zu PQ codes to GPU (%.2f MB)\n", 
+           pq_codes.size(), gpu_index.gpu_codes_size / (1024.0*1024.0));
+}
+
+void write_results_to_csv(const std::string& saveprefix, int suffix, 
+                          const std::vector<std::tuple<int, float, float, float, float>>& results) {
+    printf("\n========================================\n");
+    printf("Writing results for suffix %d to disk...\n", suffix);
+    printf("========================================\n");
+    
+    std::string savepath = saveprefix + std::to_string(suffix) + "_gpu.csv";
+    CheckPath(savepath);
+    std::ofstream outfile(savepath);
+    
+    if (outfile.is_open()) {
+        // Write header
+        outfile << "SearchEF,Recall,QPS,DCO,HOP\n";
+        
+        // Write all results for this suffix
+        for (const auto& result : results) {
+            int ef = std::get<0>(result);
+            float recall = std::get<1>(result);
+            float qps = std::get<2>(result);
+            float dco = std::get<3>(result);
+            float hop = std::get<4>(result);
+            
+            outfile << ef << "," << recall << "," << qps << "," << dco << "," << hop << "\n";
+        }
+        
+        outfile.close();
+        printf("✓ Saved %zu results to %s\n", results.size(), savepath.c_str());
+    } else {
+        printf("✗ Failed to open %s\n", savepath.c_str());
+    }
+}
+
 void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<int> SearchEF, std::string saveprefix) {
     // Validate all SearchEF values are within supported range
     for (int ef : SearchEF) {
@@ -254,7 +337,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
 
     GPUIndex gpu_index;
 
-    // Load main index data to GPU
+    // Load main index data to GPU (graph links)
     load_index_to_gpu(index, gpu_index);
     
     // Load segment tree to GPU
@@ -264,10 +347,15 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
 
     iRangeGraph::DataLoader *storage = index.storage;
 
+    std::unique_ptr<faiss::ProductQuantizer> pq_model = load_pq_model(paths["pq_model"]);
+    PQCodesBlob pq_blob = load_pq_codes(paths["pq_codes"]);
+
+    load_pq_model_to_gpu(gpu_index, pq_model.get());
+    load_pq_codes_to_gpu(gpu_index, pq_blob.codes);
     
-    // Structure to store all results in memory before writing to disk
-    // Map: suffix -> vector of (SearchEF, Recall, QPS, DCO, HOP)
-    std::map<int, std::vector<std::tuple<int, float, float, float, float>>> all_results;
+    // Structure to store results for current suffix before writing
+    // Vector of (SearchEF, Recall, QPS, DCO, HOP) for current suffix
+    std::vector<std::tuple<int, float, float, float, float>> current_suffix_results;
     
     // Iterate over all suffixes in storage->query_range (same as CPU version)
     size_t suffix_idx = 0;
@@ -276,12 +364,11 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
         printf("\n========================================\n");
         printf("Processing suffix %d (%zu/%zu)\n", suffix, suffix_idx + 1, storage->query_range.size());
         printf("========================================\n");
-        std::cout << "suffix = " << suffix << std::endl;
         
+        // Clear results for this suffix
+        current_suffix_results.clear();
 
         for (int ef : SearchEF) {
-            printf("\n--- Testing EF=%d for suffix %d ---\n", ef, suffix);
-            printf("\n=== Initializing Visited Array for Search ===\n");
             int query_nb = index.storage->query_nb;
             int max_elements = index.max_elements_;
             int dim = index.storage->Dim;
@@ -292,8 +379,6 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
                 printf("Failed to initialize visited array: %s\n", cudaGetErrorString(err));
                 return;
             }
-            printf("✓ Allocated %.2f MB for visited arrays (%d queries)\n", 
-                   visited.total_size() / (1024.0*1024.0), query_nb);
             
             // Allocate metrics arrays on GPU
             int* d_hops;
@@ -305,13 +390,12 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             cudaMemset(d_hops, 0, query_nb * sizeof(int));
             cudaMemset(d_dist_comps, 0, query_nb * sizeof(int));
             
-            int threads_per_block = 128;   // 128: 1 query per block
-            int threads_per_query = 128;   // 128 threads collaborate on each query
+            int threads_per_block = THREADS_PER_QUERY_VAL;   // 128: 1 query per block
+            int threads_per_query = THREADS_PER_QUERY_VAL;   // 128 threads collaborate on each query
             int queries_per_block = threads_per_block / threads_per_query;  // = 1
             int num_blocks = (query_nb + queries_per_block - 1) / queries_per_block;
             
-            printf("Configuration: %d blocks × %d threads, Queries: %d, K: %d\n", 
-                   num_blocks, threads_per_block, query_nb, query_K);
+
             
             // Reset visited counters for new search
             unsigned short* temp_curV = new unsigned short[query_nb];
@@ -320,21 +404,29 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             cudaMemset(visited.d_mass, 0, (size_t)query_nb * max_elements * sizeof(unsigned short));
             delete[] temp_curV;
             
-            // Time the kernel
+            // CRITICAL: Clear output buffers before each SearchEF iteration
+            cudaMemset(d_hops, 0, query_nb * sizeof(int));
+            cudaMemset(d_dist_comps, 0, query_nb * sizeof(int));
+            
+            // Launch appropriate kernel (PQ or normal) - no branching inside kernel
+            unsigned long long kernel_seed = std::chrono::system_clock::now().time_since_epoch().count();
+            
             cudaEvent_t start, stop;
             cudaEventCreate(&start);
             cudaEventCreate(&stop);
             cudaEventRecord(start);
             
-            // Launch kernel
-            unsigned long long kernel_seed = std::chrono::system_clock::now().time_since_epoch().count();
-            search_gpu<<<num_blocks, threads_per_block>>>(
-                gpu_index.d_query_range, query_nb, ef, M, 
-                &gpu_index.d_segment_tree, visited.d_mass, max_elements,
-                gpu_index.d_query_vectors, dim, gpu_index.d_data_memory, gpu_index.d_size_data_per_element,
-                gpu_index.d_offsetData, gpu_index.d_size_links_per_layer,
-                gpu_index.d_results, query_K, d_hops, d_dist_comps, false
-            );
+            if (gpu_index.use_pq) {
+                irange_search_kernel_pq<<<num_blocks, threads_per_block>>>(
+                    gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx, d_hops, d_dist_comps,
+                    index.size_links_per_layer_, kernel_seed
+                );
+            } else {
+                irange_search_kernel_normal<<<num_blocks, threads_per_block>>>(
+                    gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx, d_hops, d_dist_comps,
+                    index.size_links_per_layer_, kernel_seed
+                );
+            }
             
             cudaEventRecord(stop);
             cudaEventSynchronize(stop);
@@ -389,27 +481,8 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             float avg_hops = (float)total_hops / query_nb;
             float avg_dco = (float)total_dist_comps / query_nb;
             
-            printf("  Recall: %.4f\n", recall);
-            printf("  QPS: %.2f\n", qps);
-            printf("  Avg Distance Computations: %.2f\n", avg_dco);
-            printf("  Avg Hops: %.2f\n", avg_hops);
-            printf("  Search time: %.3f seconds\n", searchtime);
-            
-            // Store results in memory (will write to file later)
-            all_results[suffix].push_back(std::make_tuple(ef, recall, qps, avg_dco, avg_hops));
-            
-            // Show first 3 query results for this suffix (only for first EF value)
-            if (suffix == 0 && ef == SearchEF[0]) {
-                printf("\n  First 3 Query Results:\n");
-                for (int i = 0; i < 3 && i < query_nb; i++) {
-                    printf("    Query %d: [", i);
-                    for (int k = 0; k < query_K; k++) {
-                        printf("%d", cpu_results[i * query_K + k]);
-                        if (k < query_K - 1) printf(", ");
-                    }
-                    printf("] (hops=%d, dco=%d)\n", cpu_hops[i], cpu_dist_comps[i]);
-                }
-            }
+            // Store results for this suffix
+            current_suffix_results.push_back(std::make_tuple(ef, recall, qps, avg_dco, avg_hops));
             
             delete[] cpu_results;
             delete[] cpu_hops;
@@ -426,46 +499,18 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             
         }
 
+        // Write results to CSV file for this suffix
+        write_results_to_csv(saveprefix, suffix, current_suffix_results);
+
         suffix_idx++;  // Increment for next suffix
 
     }
 
-    // Write all results to CSV files (outside of loops)
+    
+    
     printf("\n========================================\n");
-    printf("Writing all results to disk...\n");
+    printf("All suffixes processed and results written!\n");
     printf("========================================\n");
-    
-    for (const auto& result_entry : all_results) {
-        int suffix = result_entry.first;
-        const auto& results = result_entry.second;
-        
-        std::string savepath = saveprefix + std::to_string(suffix) + "_gpu.csv";
-        CheckPath(savepath);
-        std::ofstream outfile(savepath);
-        
-        if (outfile.is_open()) {
-            // Write header
-            outfile << "SearchEF,Recall,QPS,DCO,HOP\n";
-            
-            // Write all results for this suffix
-            for (const auto& result : results) {
-                int ef = std::get<0>(result);
-                float recall = std::get<1>(result);
-                float qps = std::get<2>(result);
-                float dco = std::get<3>(result);
-                float hop = std::get<4>(result);
-                
-                outfile << ef << "," << recall << "," << qps << "," << dco << "," << hop << "\n";
-            }
-            
-            outfile.close();
-            printf("✓ Saved %zu results to %s\n", results.size(), savepath.c_str());
-        } else {
-            printf("✗ Failed to open %s\n", savepath.c_str());
-        }
-    }
-    
-    printf("✓ All results written to disk\n");
 
 
     // Initialize visited array for all queries
@@ -484,48 +529,62 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     printf("✓ GPU memory cleaned up\n");
 }
 
-// CUDA kernel for vector addition
-// No change when using CUDA unified memory
-__global__ void vectorAdd(int *a, int *b, int *c, int N) {
-    // Calculate global thread thread ID
-    int tid = (blockDim.x * blockIdx.x) + threadIdx.x;
-    // Boundary check
-    if (tid < N) {
-        c[tid] = a[tid] + b[tid];
-    }
-}
+
 
 int main(int argc, char **argv) {
-
 
     for (int i = 0; i < argc; i++)
     {
         std::string arg = argv[i];
-        if (arg == "--data_path")
+        if (arg == "--data_path_comp")
             paths["data_vector"] = argv[i + 1];
         if (arg == "--query_path")
             paths["query_vector"] = argv[i + 1];
+        if (arg == "--index_path")
+            paths["index"] = argv[i + 1];
+        if (arg == "--result_saveprefix")
+            paths["result_saveprefix"] = argv[i + 1];
         if (arg == "--range_saveprefix")
             paths["range_saveprefix"] = argv[i + 1];
         if (arg == "--groundtruth_saveprefix")
             paths["groundtruth_saveprefix"] = argv[i + 1];
-        if (arg == "--index_file")
-            paths["index"] = argv[i + 1];
-        if (arg == "--result_saveprefix")
-            paths["result_saveprefix"] = argv[i + 1];
-        if (arg == "--M")
+        if (arg == "--pq_model_out")
+            paths["pq_model"] = argv[i + 1];
+        if (arg == "--pq_codes_out")
+            paths["pq_codes"] = argv[i + 1];
+        if (arg == "--M_compression_spaces")
             M = std::stoi(argv[i + 1]);
+        if (arg == "--graph_M")
+            M = std::stoi(argv[i + 1]);  // Can also override with graph_M
     }
 
-    if (argc != 15)
-        throw Exception("please check input parameters");
-
+    if (argc < 15) {
+        std::cerr << "Usage: " << argv[0] << std::endl
+                  << "  --data_path_comp <path>" << std::endl
+                  << "  --query_path <path>" << std::endl
+                  << "  --index_path <path>" << std::endl
+                  << "  --result_saveprefix <path>" << std::endl
+                  << "  --range_saveprefix <path>" << std::endl
+                  << "  --groundtruth_saveprefix <path>" << std::endl
+                  << "  --pq_model_out <path>" << std::endl
+                  << "  --pq_codes_out <path>" << std::endl
+                  << "  --M_compression_spaces <int>" << std::endl
+                  << "  [--graph_M <int>] (default: 32 - edges per node in graph)" << std::endl;
+        return 1;
+    }
     
+    if (paths["data_vector"].empty() || paths["query_vector"].empty() || paths["index"].empty() ||
+        paths["result_saveprefix"].empty() || paths["range_saveprefix"].empty() || 
+        paths["groundtruth_saveprefix"].empty() || paths["pq_model"].empty() || paths["pq_codes"].empty()) {
+        std::cerr << "Error: All path arguments are required" << std::endl;
+        return 1;
+    }
+    
+
     iRangeGraph::DataLoader storage;
     storage.query_K = query_K;
     std::cout << "Loading queries..." << std::endl;
     storage.LoadQuery(paths["query_vector"]);
-    // If it is the first run, Generate shall be called; otherwise, Generate can be skipped
     // Generate(storage);
     std::cout << "Loading query ranges..." << std::endl;
     storage.LoadQueryRange(paths["range_saveprefix"]);
@@ -534,23 +593,24 @@ int main(int argc, char **argv) {
 
     std::cout << "Loading index..." << std::endl;
     iRangeGraph::iRangeGraph_Search<float> index(paths["data_vector"], paths["index"], &storage, M);
-    
-    // SearchEF values to test (can be adjusted)
-    std::vector<int> SearchEF = {1700, 1400, 1100, 1000, 900, 800, 700, 600, 500, 400, 300, 250, 200, 180, 160, 140, 120, 100, 90, 80, 70, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10};
-    
-    std::cout << "\n================================================" << std::endl;
-    std::cout << "Running GPU search with " << SearchEF.size() << " different SearchEF values" << std::endl;
-    std::cout << "Testing " << storage.query_range.size() << " suffixes with all EF values" << std::endl;
-    std::cout << "Total tests: " << SearchEF.size() * storage.query_range.size() << std::endl;
-    std::cout << "================================================\n" << std::endl;
-    
-    // Test all suffixes with all EF values
-    search_on_gpu(index, SearchEF, paths["result_saveprefix"]);
 
-    std::cout << "\n================================================" << std::endl;
-    std::cout << "All GPU searches complete!" << std::endl;
-    std::cout << "================================================" << std::endl;
+
     
+    // Create GPUIndex - it will own all GPU memory
+    printf("\n========================================\n");
+    printf("Creating GPUIndex structure...\n");
+    printf("========================================\n");    
+
+    
+    // SearchEF values to test (from largest to smallest for better performance)
+    std::vector<int> SearchEF_values = {1700, 1400, 1100, 1000, 900, 800, 700, 600, 500, 400, 300, 250, 200, 180, 160, 140, 120, 100, 90, 80, 70, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10};
+    
+    search_on_gpu(index, SearchEF_values, paths["result_saveprefix"]);
+    
+    
+    printf("\n========================================\n");
+    printf("Cleanup complete\n");
+    printf("========================================\n");
     
     return 0;
 }
