@@ -14,7 +14,7 @@
 #include "gpu_index.cuh"
 #include "gpu_heap.cuh"
 #include "gpu_visited.cuh"
-#include "gpu_search.cuh"
+#include "gpu_search_updated.cuh"
 
 
 const int query_K = 10;
@@ -305,8 +305,8 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             cudaMemset(d_hops, 0, query_nb * sizeof(int));
             cudaMemset(d_dist_comps, 0, query_nb * sizeof(int));
             
-            int threads_per_block = 128;   // 128: 1 query per block
-            int threads_per_query = 128;   // 128 threads collaborate on each query
+            int threads_per_block = THREADS_PER_QUERY;   // 128: 1 query per block
+            int threads_per_query = THREADS_PER_QUERY;   // 128 threads collaborate on each query
             int queries_per_block = threads_per_block / threads_per_query;  // = 1
             int num_blocks = (query_nb + queries_per_block - 1) / queries_per_block;
             
@@ -328,12 +328,9 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             
             // Launch kernel
             unsigned long long kernel_seed = std::chrono::system_clock::now().time_since_epoch().count();
-            search_gpu<<<num_blocks, threads_per_block>>>(
-                gpu_index.d_query_range, query_nb, ef, M, 
-                &gpu_index.d_segment_tree, visited.d_mass, max_elements,
-                gpu_index.d_query_vectors, dim, gpu_index.d_data_memory, gpu_index.d_size_data_per_element,
-                gpu_index.d_offsetData, gpu_index.d_size_links_per_layer,
-                gpu_index.d_results, query_K, d_hops, d_dist_comps, false
+            irange_search_kernel<<<num_blocks, threads_per_block>>>(
+                gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx, d_hops, d_dist_comps,
+                index.size_links_per_layer_, kernel_seed
             );
             
             cudaEventRecord(stop);
