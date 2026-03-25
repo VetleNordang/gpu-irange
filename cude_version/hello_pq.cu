@@ -16,7 +16,8 @@
 #include "gpu_index.cuh"
 #include "gpu_heap.cuh"
 #include "gpu_visited.cuh"
-#include "gpu_search_updated.cuh"
+#include "gpu_search_updated.cuh"  // Contains irange_search_kernel (normal)
+#include "gpu_search_pq.cuh"       // Contains irange_search_kernel_pq (PQ version)
 #include <faiss/impl/ProductQuantizer.h>
 #include <faiss/index_io.h>
 
@@ -417,12 +418,14 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             cudaEventRecord(start);
             
             if (gpu_index.use_pq) {
+                printf("Launching PQ search kernel for SearchEF=%d...\n", ef);
                 irange_search_kernel_pq<<<num_blocks, threads_per_block>>>(
                     gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx, d_hops, d_dist_comps,
                     index.size_links_per_layer_, kernel_seed
                 );
             } else {
-                irange_search_kernel_normal<<<num_blocks, threads_per_block>>>(
+                printf("Launching normal search kernel for SearchEF=%d...\n", ef);
+                irange_search_kernel<<<num_blocks, threads_per_block>>>(
                     gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx, d_hops, d_dist_comps,
                     index.size_links_per_layer_, kernel_seed
                 );
