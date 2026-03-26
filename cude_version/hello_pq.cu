@@ -23,7 +23,8 @@
 
 
 const int query_K = 10;
-int M;
+int M_graph = 32;  // Example value, adjust as needed
+int M_compression = 320;  // Example value, adjust as needed
 
 #define THREADS_PER_QUERY_VAL 128
 #define MAX_THREADS_PER_BLOCK 2000
@@ -102,6 +103,48 @@ void load_index_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &
     int data_points = index.max_elements_;
     size_t total_index_memory = (size_t)data_points * index.size_data_per_element_;
     
+    // Calculate memory breakdown
+    size_t embeddings_memory = (size_t)data_points * dimension * sizeof(float);
+    size_t links_memory = total_index_memory - embeddings_memory;
+    
+    printf("\n========== INDEX MEMORY BREAKDOWN (DIAGNOSTIC) ==========\n");
+    printf("Data points: %d\n", data_points);
+    printf("Dimension: %d\n", dimension);
+    printf("size_data_per_element: %zu bytes/point\n", index.size_data_per_element_);
+    printf("size_links_per_element: %zu bytes/point\n", index.size_links_per_element_);
+    printf("offsetData: %zu bytes (start offset for embeddings)\n", index.offsetData_);
+    
+    printf("\nTheoretical calculation (assuming layout):\n");
+    printf("  IF layout is [adjacency lists][embeddings]:\n");
+    printf("    Embeddings: %zu bytes (%.2f GB) = %d points × %d dims × 4 bytes\n", 
+           embeddings_memory, embeddings_memory / 1e9, data_points, dimension);
+    printf("    Adjacency lists: %zu bytes (%.2f GB)\n", links_memory, links_memory / 1e9);
+    
+    printf("\nActual memory layout (from data_memory_ structure):\n");
+    printf("  offsetData=%zu suggests embeddings START at byte %zu\n", index.offsetData_, index.offsetData_);
+    printf("  If offsetData > 0: embeddings are AFTER adjacency lists (adjlist comes first)\n");
+    printf("  If offsetData = 0: embeddings are FIRST\n");
+    
+    // Sample first few bytes to understand layout
+    printf("\nSampling first point (pid=0) memory layout:\n");
+    char* base = (char*)index.data_memory_;
+    printf("  Bytes 0-3 (first int of adjacency list): ");
+    int first_val = *((int*)(base + 0));
+    printf("%d\n", first_val);
+    
+    printf("  Bytes at offsetData=%zu (should be embedding start): ", index.offsetData_);
+    float first_embedding = *((float*)(base + index.offsetData_));
+    printf("%f\n", first_embedding);
+    
+    printf("\nPer-point memory structure:\n");
+    printf("  size_links_per_element = %zu bytes\n", index.size_links_per_element_);
+    printf("  size_data_per_element = %zu bytes\n", index.size_data_per_element_);
+    printf("  Difference (padding/embeddings): %zu bytes\n", 
+           index.size_data_per_element_ - index.size_links_per_element_);
+    
+    printf("\nTOTAL INDEX MEMORY: %zu bytes (%.2f GB)\n", total_index_memory, total_index_memory / 1e9);
+    printf("=========================================\n\n");
+    
     // Set metadata
     gpu_index.d_dim = dimension;
     gpu_index.d_size_data_per_element = index.size_data_per_element_;
@@ -122,8 +165,97 @@ void load_index_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &
         cudaFree(gpu_index.d_data_memory);
         return;
     }
-    printf("✓ Copied %.2f GB from CPU to GPU\n", 
+    printf("✓ Copied %.2f GB from CPU to GPU (index + embeddings + adjacency lists)\n", 
             total_index_memory / (1024.0*1024.0*1024.0));
+}
+
+void load_index_compact_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &gpu_index, 
+                               const std::string& index_path) {
+    // Extract adjacency lists from CPU memory (data_memory_ is already loaded and padded)
+    // This is for PQ mode: we copy ONLY the adjacency list portions, avoiding embeddings and padding
+    
+    printf("\n========== COMPACT INDEX LOADING (PQ MODE) ==========\n");
+    printf("Extracting adjacency lists from CPU memory (compact transfer to GPU)\n");
+    
+    int data_points = index.max_elements_;
+    size_t size_links_per_element = index.size_links_per_element_;
+    size_t size_data_per_element = index.size_data_per_element_;  // Includes padding
+    
+    printf("Memory calculation (compact, no padding):\n");
+    printf("  Data points: %d\n", data_points);
+    printf("  Adjacency per point (actual): %zu bytes\n", size_links_per_element);
+    printf("  Total padded size per point: %zu bytes (padding: %zu bytes)\n", 
+           size_data_per_element, size_data_per_element - size_links_per_element);
+    printf("  TOTAL adjacency lists only: %zu bytes (%.2f MB)\n", 
+           (size_t)data_points * size_links_per_element, 
+           ((size_t)data_points * size_links_per_element) / (1024.0*1024.0));
+    printf("  OLD total with padding: %zu bytes (%.2f MB)\n",
+           (size_t)data_points * size_data_per_element,
+           ((size_t)data_points * size_data_per_element) / (1024.0*1024.0));
+    
+    size_t total_compact_memory = (size_t)data_points * size_links_per_element;
+    
+    // Allocate GPU memory for d_data_memory but only with adjacency list size (no padding!)
+    // This way kernels can still access through d_data_memory pointer
+    cudaError_t err = cudaMalloc((void**)&gpu_index.d_data_memory, total_compact_memory);
+    if (err != cudaSuccess) {
+        printf("ERROR: CudaMalloc failed for compact adjacency lists: %s\n", cudaGetErrorString(err));
+        return;
+    }
+    
+    // Also keep track for cleanup later
+    gpu_index.d_adjacency_lists = gpu_index.d_data_memory;
+    gpu_index.d_adjacency_lists_size = total_compact_memory;
+    
+    // Copy adjacency lists sequentially from CPU memory
+    // Note: Each point starts at data_memory_ + i * size_data_per_element
+    // Adjacency list is the first size_links_per_element bytes of each point
+    printf("Copying adjacency lists from CPU to GPU (compacting out padding)...\n");
+    
+    char* host_buffer = new char[total_compact_memory];
+    if (!host_buffer) {
+        printf("ERROR: Failed to allocate host buffer\n");
+        cudaFree(gpu_index.d_data_memory);
+        return;
+    }
+    
+    // Extract adjacency lists without padding
+    char* dst = host_buffer;
+    for (int i = 0; i < data_points; i++) {
+        char* src = (char*)index.data_memory_ + i * size_data_per_element;
+        memcpy(dst, src, size_links_per_element);
+        dst += size_links_per_element;
+    }
+    
+    // Transfer to GPU in one go
+    err = cudaMemcpy(gpu_index.d_data_memory, host_buffer, total_compact_memory, cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        printf("ERROR: CudaMemcpy failed for adjacency lists: %s\n", cudaGetErrorString(err));
+        delete[] host_buffer;
+        cudaFree(gpu_index.d_data_memory);
+        return;
+    }
+    
+    delete[] host_buffer;
+    
+    // Set metadata - CRITICAL: update size_data_per_element to compact size for kernel access
+    gpu_index.d_dim = index.storage->Dim;
+    gpu_index.d_size_data_per_element = size_links_per_element;  // COMPACT MODE: only adjacency lists
+    gpu_index.d_size_links_per_element = index.size_links_per_element_;
+    gpu_index.d_offsetData = 0;  // No embeddings in compact mode
+    
+    printf("✓ Copied %.2f MB compact adjacency lists to d_data_memory (NO embeddings, NO padding)\n", 
+           total_compact_memory / (1024.0*1024.0));
+    printf("✓ Updated d_size_data_per_element to %zu (compact) for kernel access\n", size_links_per_element);
+    
+    printf("\n[GPU TRANSFER] Adjacency Lists (Compact):\n");
+    printf("  - Size per point: %zu bytes (links only)\n", size_links_per_element);
+    printf("  - Total points: %d\n", data_points);
+    printf("  - Total transferred: %.2f MB (%.4f GB)\n", 
+           total_compact_memory / (1024.0*1024.0), total_compact_memory / (1024.0*1024.0*1024.0));
+    printf("  - Reduction vs CPU padded: %.1f%%\n", 
+           100.0 * (1.0 - (double)total_compact_memory / ((size_t)data_points * size_data_per_element)));
+    printf("===================================================\n\n");
 }
 
 void load_segment_tree_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &gpu_index) {
@@ -230,7 +362,18 @@ void load_queries_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex
     delete[] flatten_queries;
     delete[] flatten_ranges;
     
+    size_t query_vectors_transferred = (size_t)query_nb * dim * sizeof(float);
+    size_t query_ranges_transferred = (size_t)query_nb * 2 * sizeof(int) * suffix_keys.size();
+    
     printf("✓ Copied %d queries (%d suffixes) and ranges to GPU\n", query_nb, (int)suffix_keys.size());
+    
+    printf("\n[GPU TRANSFER] Query Vectors & Ranges:\n");
+    printf("  - Query vectors: %d vectors × %d dims × 4 bytes = %.2f MB\n", 
+           query_nb, dim, query_vectors_transferred / (1024.0*1024.0));
+    printf("  - Query ranges: %d queries × %zu suffixes × 2 ints = %.2f MB\n",
+           query_nb, suffix_keys.size(), query_ranges_transferred / (1024.0*1024.0));
+    printf("  - Total query data: %.2f MB\n", 
+           (query_vectors_transferred + query_ranges_transferred) / (1024.0*1024.0));
 }
 
 int* make_result_buffer_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &gpu_index) {
@@ -271,12 +414,39 @@ void load_pq_model_to_gpu(GPUIndex &gpu_index, faiss::ProductQuantizer* pq_model
     
     printf("✓ Loaded PQ model to GPU: M=%d, nbits=%d, dsub=%d, ksub=%d\n", 
            gpu_index.pq_M, gpu_index.pq_nbits, gpu_index.pq_dsub, gpu_index.pq_ksub);
+    
+    size_t centroids_memory = centroids_size;
+    printf("\n[GPU TRANSFER] PQ Model Centroids:\n");
+    printf("  - Subspaces (M): %d\n", pq_model->M);
+    printf("  - Centroids per subspace (ksub): %d\n", pq_model->ksub);
+    printf("  - Dimension per subspace (dsub): %d\n", pq_model->dsub);
+    printf("  - Total centroids: %ld (M × ksub × dsub = %d × %d × %d)\n", 
+           centroids_memory / sizeof(float), pq_model->M, pq_model->ksub, pq_model->dsub);
+    printf("  - Total transferred: %.2f MB\n", centroids_memory / (1024.0*1024.0));
+    printf("  - Format: float32\n");
 }
 
-void load_pq_codes_to_gpu(GPUIndex &gpu_index, const std::vector<uint8_t>& pq_codes) {
+void load_pq_codes_to_gpu(GPUIndex &gpu_index, const std::vector<uint8_t>& pq_codes, 
+                          int n_vectors, int M, int code_size, int ksub, int dsub) {
     gpu_index.pq_codes_cpu = pq_codes;  // Keep a copy on CPU for reference
 
     gpu_index.gpu_codes_size = (size_t)pq_codes.size() * sizeof(uint8_t);
+    
+    // Calculate PQ centroids memory
+    size_t centroids_size = (size_t)M * ksub * dsub * sizeof(float);
+    
+    printf("\n========== PQ MEMORY BREAKDOWN ==========\n");
+    printf("PQ Model parameters: n=%d, M=%d, nbits=?, ksub=%d, dsub=%d\n", 
+           n_vectors, M, ksub, dsub);
+    printf("\nPQ-specific allocations:\n");
+    printf("  PQ codes: %zu bytes (%.2f MB) = %d vectors × %d bytes/code\n", 
+           gpu_index.gpu_codes_size, gpu_index.gpu_codes_size / (1024.0*1024.0), 
+           n_vectors, code_size);
+    printf("  PQ centroids: %zu bytes (%.2f MB) = %d subspaces × %d centroids × %d dims × 4 bytes\n",
+           centroids_size, centroids_size / (1024.0*1024.0), M, ksub, dsub);
+    printf("  TOTAL PQ: %.2f MB\n", (gpu_index.gpu_codes_size + centroids_size) / (1024.0*1024.0));
+    printf("=========================================\n\n");
+    
     cudaError_t err = cudaMalloc((void**)&gpu_index.d_compressed_codes, gpu_index.gpu_codes_size);
     if (err != cudaSuccess) {
         printf("CudaMalloc failed for PQ codes: %s\n", cudaGetErrorString(err));
@@ -292,6 +462,16 @@ void load_pq_codes_to_gpu(GPUIndex &gpu_index, const std::vector<uint8_t>& pq_co
     
     printf("✓ Loaded %zu PQ codes to GPU (%.2f MB)\n", 
            pq_codes.size(), gpu_index.gpu_codes_size / (1024.0*1024.0));
+    
+    printf("\n[GPU TRANSFER] PQ Codes (Compressed Vectors):\n");
+    printf("  - Total vectors: %d\n", n_vectors);
+    printf("  - Code size per vector: %d bytes (M=%d subspaces, %d bits each)\n", 
+           code_size, M, 8 / (M > 0 ? (int)log2(ksub) : 1));
+    printf("  - Total codes: %zu bytes (%.2f MB)\n", 
+           gpu_index.gpu_codes_size, gpu_index.gpu_codes_size / (1024.0*1024.0));
+    printf("  - Format: uint8_t (byte-aligned codes)\n");
+    printf("  - Compression ratio vs full vectors: %.1f%% of full float32\n",
+           100.0 * gpu_index.gpu_codes_size / (n_vectors * 96 * sizeof(float)));
 }
 
 void write_results_to_csv(const std::string& saveprefix, int suffix, 
@@ -338,8 +518,14 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
 
     GPUIndex gpu_index;
 
-    // Load main index data to GPU (graph links)
-    load_index_to_gpu(index, gpu_index);
+    
+    if (index.use_pq_) {
+        printf("\n>>> PQ MODE DETECTED: Loading COMPACT adjacency lists only\n");
+        load_index_compact_to_gpu(index, gpu_index, paths["index"]);
+    } else {
+        printf("\n>>> NORMAL MODE: Loading full index (embeddings + adjacency lists)\n");
+        load_index_to_gpu(index, gpu_index);
+    }
     
     // Load segment tree to GPU
     load_segment_tree_to_gpu(index, gpu_index);
@@ -352,7 +538,56 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     PQCodesBlob pq_blob = load_pq_codes(paths["pq_codes"]);
 
     load_pq_model_to_gpu(gpu_index, pq_model.get());
-    load_pq_codes_to_gpu(gpu_index, pq_blob.codes);
+    load_pq_codes_to_gpu(gpu_index, pq_blob.codes, pq_blob.n, pq_blob.M, pq_blob.code_size, pq_model->ksub, pq_model->dsub);
+    
+    // ===== PRINT GPU MEMORY SUMMARY =====
+    size_t adjacency_lists_size = (size_t)index.max_elements_ * index.size_links_per_element_;
+    size_t pq_codes_size = pq_blob.codes.size();
+    size_t pq_centroids_size = (size_t)pq_blob.M * pq_model->ksub * pq_model->dsub * sizeof(float);
+    int query_nb = index.storage->query_nb;
+    int dim = index.storage->Dim;
+    size_t query_vectors_size = (size_t)query_nb * dim * sizeof(float);
+    
+    // Count unique suffixes for ranges
+    int num_suffixes = index.storage->query_range.size();
+    size_t query_ranges_size = (size_t)query_nb * 2 * sizeof(int) * num_suffixes;
+    
+    size_t total_gpu_memory = adjacency_lists_size + pq_codes_size + pq_centroids_size + 
+                              query_vectors_size + query_ranges_size;
+    
+    printf("\n");
+    printf("╔════════════════════════════════════════════════════════════╗\n");
+    printf("║         GPU MEMORY ALLOCATION SUMMARY (PQ MODE)           ║\n");
+    printf("╠════════════════════════════════════════════════════════════╣\n");
+    printf("║ COMPONENT                          │ SIZE (MB)  │ SIZE (GB) ║\n");
+    printf("╠════════════════════════════════════════════════════════════╣\n");
+    printf("║ Adjacency Lists (Compact)          │ %10.2f │ %9.4f ║\n",
+           adjacency_lists_size / (1024.0*1024.0), adjacency_lists_size / (1024.0*1024.0*1024.0));
+    printf("║ PQ Compressed Codes (uint8)        │ %10.2f │ %9.4f ║\n",
+           pq_codes_size / (1024.0*1024.0), pq_codes_size / (1024.0*1024.0*1024.0));
+    printf("║ PQ Centroids (float32)             │ %10.2f │ %9.4f ║\n",
+           pq_centroids_size / (1024.0*1024.0), pq_centroids_size / (1024.0*1024.0*1024.0));
+    printf("║ Query Vectors (float32)            │ %10.2f │ %9.4f ║\n",
+           query_vectors_size / (1024.0*1024.0), query_vectors_size / (1024.0*1024.0*1024.0));
+    printf("║ Query Ranges (int32)               │ %10.2f │ %9.4f ║\n",
+           query_ranges_size / (1024.0*1024.0), query_ranges_size / (1024.0*1024.0*1024.0));
+    printf("╠════════════════════════════════════════════════════════════╣\n");
+    printf("║ TOTAL GPU MEMORY USED              │ %10.2f │ %9.4f ║\n",
+           total_gpu_memory / (1024.0*1024.0), total_gpu_memory / (1024.0*1024.0*1024.0));
+    printf("╚════════════════════════════════════════════════════════════╝\n");
+    printf("\nKey Facts:\n");
+    printf("  ✓ NO full embeddings loaded (replaced by PQ codes)\n");
+    printf("  ✓ NO padding in adjacency lists (compact layout)\n");
+    printf("  ✓ Adjacency lists: %d bytes/point (no embeddings, no padding)\n", 
+           (int)index.size_links_per_element_);
+    printf("  ✓ PQ Code size: %d bytes/vector (vs %d bytes for full float32)\n",
+           pq_blob.code_size, dim * (int)sizeof(float));
+    printf("  ✓ Query vectors: %d × %d dims\n", query_nb, dim);
+    printf("  ✓ Distance calculation: Using PQDistance() with compressed codes\n");
+    printf("\n");
+    
+    
+   
     
     // Structure to store results for current suffix before writing
     // Vector of (SearchEF, Recall, QPS, DCO, HOP) for current suffix
@@ -418,13 +653,11 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             cudaEventRecord(start);
             
             if (gpu_index.use_pq) {
-                printf("Launching PQ search kernel for SearchEF=%d...\n", ef);
                 irange_search_kernel_pq<<<num_blocks, threads_per_block>>>(
                     gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx, d_hops, d_dist_comps,
                     index.size_links_per_layer_, kernel_seed
                 );
             } else {
-                printf("Launching normal search kernel for SearchEF=%d...\n", ef);
                 irange_search_kernel<<<num_blocks, threads_per_block>>>(
                     gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx, d_hops, d_dist_comps,
                     index.size_links_per_layer_, kernel_seed
@@ -508,7 +741,6 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
         suffix_idx++;  // Increment for next suffix
 
     }
-
     
     
     printf("\n========================================\n");
@@ -524,10 +756,13 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     
     // Clean up GPU memory
     if (gpu_index.d_data_memory) cudaFree(gpu_index.d_data_memory);
+    if (gpu_index.d_adjacency_lists) cudaFree(gpu_index.d_adjacency_lists);
     if (gpu_index.d_segment_tree.d_nodes) cudaFree(gpu_index.d_segment_tree.d_nodes);
     if (gpu_index.d_query_vectors) cudaFree(gpu_index.d_query_vectors);
     if (gpu_index.d_query_range) cudaFree(gpu_index.d_query_range);
     if (gpu_index.d_results) cudaFree(gpu_index.d_results);
+    if (gpu_index.d_compressed_codes) cudaFree(gpu_index.d_compressed_codes);
+    if (gpu_index.d_centroids) cudaFree(gpu_index.d_centroids);
     
     printf("✓ GPU memory cleaned up\n");
 }
@@ -556,9 +791,9 @@ int main(int argc, char **argv) {
         if (arg == "--pq_codes_out")
             paths["pq_codes"] = argv[i + 1];
         if (arg == "--M_compression_spaces")
-            M = std::stoi(argv[i + 1]);
+            M_compression = std::stoi(argv[i + 1]);
         if (arg == "--graph_M")
-            M = std::stoi(argv[i + 1]);  // Can also override with graph_M
+            M_graph = std::stoi(argv[i + 1]);  // Can also override with graph_M
     }
 
     if (argc < 15) {
@@ -595,8 +830,18 @@ int main(int argc, char **argv) {
     storage.LoadGroundtruth(paths["groundtruth_saveprefix"]);
 
     std::cout << "Loading index..." << std::endl;
-    iRangeGraph::iRangeGraph_Search<float> index(paths["data_vector"], paths["index"], &storage, M);
+    iRangeGraph::iRangeGraph_Search<float> index(paths["data_vector"], paths["index"], &storage, M_graph);
 
+    int data_memory_size = index.max_elements_ * index.size_data_per_element_;  
+    printf("the size of data_memory_ loaded in index: %zu bytes\n", data_memory_size);
+    printf("the size of data per element: %zu bytes\n", index.size_data_per_element_);
+    printf("the size of links per element: %zu bytes\n", index.size_links_per_element_);
+    printf("the offset for data (embeddings) in each element: %zu bytes\n", index.offsetData_);
+
+    int memory_for_links = index.max_elements_ * index.size_links_per_element_;
+
+    printf("theoretical memory for adjacency lists (links only): %zu bytes (%.2f GB)\n", 
+           memory_for_links, memory_for_links / 1e9);
 
     
     // Create GPUIndex - it will own all GPU memory
@@ -607,6 +852,12 @@ int main(int argc, char **argv) {
     
     // SearchEF values to test (from largest to smallest for better performance)
     std::vector<int> SearchEF_values = {1700, 1400, 1100, 1000, 900, 800, 700, 600, 500, 400, 300, 250, 200, 180, 160, 140, 120, 100, 90, 80, 70, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10};
+    
+    // Load PQ codes to set use_pq_ flag BEFORE search_on_gpu, so compact loader is used
+    std::unique_ptr<faiss::ProductQuantizer> pq_model_for_flag = load_pq_model(paths["pq_model"]);
+    PQCodesBlob pq_blob_for_flag = load_pq_codes(paths["pq_codes"]);
+    index.load_pq_codes(pq_blob_for_flag.codes, pq_blob_for_flag.code_size, 
+                        pq_blob_for_flag.M, pq_blob_for_flag.nbits, pq_model_for_flag.get());
     
     search_on_gpu(index, SearchEF_values, paths["result_saveprefix"]);
     

@@ -8,11 +8,19 @@
 	"runArgs": ["--gpus", "all"],
 	"customizations": {
 		"vscode": {
-		"extensions": [
-			"ms-vscode.cpptools",
-			"ms-vscode.cmake-tools",
-			"mechatroner.rainbow-csv"
-		]
+			"extensions": [
+				"ms-vscode.cpptools",
+				"ms-vscode.cmake-tools",
+				"mechatroner.rainbow-csv"
+			],
+			"settings": {
+			"terminal.integrated.defaultProfile.linux": "bash",
+			"terminal.integrated.shellIntegration.enabled": true,
+			"terminal.integrated.suggest.enabled": true,
+			"terminal.integrated.stickyScroll.enabled": true,
+			"terminal.integrated.shellIntegration.decorationsEnabled": "both",
+			"terminal.integrated.shellIntegration.nonce": true,
+			}
 		}
   	},
 
@@ -24,7 +32,7 @@
 
 	// Use 'postCreateCommand' to run commands after the container is created.
 	// "postCreateCommand": "pip3 install -r python/requirements.txt",
-	"postCreateCommand": "pip3 install tensorflow-datasets tensorflow numpy pandas matplotlib"
+	"postCreateCommand": "bash .devcontainer/postCreate.sh",
 
 	// Configure tool-specific properties.
 	// "customizations": {},

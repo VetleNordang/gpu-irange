@@ -39,6 +39,10 @@ struct GPUIndex {
     // GPU device pointers
     char* d_data_memory;
     
+    // Compact adjacency lists (for PQ mode - no padding, only graph links)
+    char* d_adjacency_lists;
+    size_t d_adjacency_lists_size;
+    
     // Sizes for memory management
     size_t d_size_data_per_element;
     size_t d_size_links_per_element;
@@ -81,6 +85,10 @@ void GPUIndex::free() {
     if (d_data_memory) {
         cudaFree(d_data_memory);
         d_data_memory = nullptr;
+    }
+    if (d_adjacency_lists) {
+        cudaFree(d_adjacency_lists);
+        d_adjacency_lists = nullptr;
     }
     if (d_segment_tree.d_nodes) {
         cudaFree(d_segment_tree.d_nodes);

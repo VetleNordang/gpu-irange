@@ -50,7 +50,7 @@ endif
 # 		--index_file $(PROJECT_ROOT)/exectable_data/gist1m/750k/gist_750k.index \
 # 		--result_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/750k/results/results_750k \
 # 		--M 32
-
+# Normal distance computation args (1000k dataset)
 ARGS = --data_path $(PROJECT_ROOT)/exectable_data/gist1m/1000k/gist_base_1000k.bin \
 		--query_path $(PROJECT_ROOT)/exectable_data/gist1m/1000k/gist_query_1000k.bin \
 		--range_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/1000k/query_ranges/query_ranges_1000k \
@@ -58,6 +58,29 @@ ARGS = --data_path $(PROJECT_ROOT)/exectable_data/gist1m/1000k/gist_base_1000k.b
 		--index_file $(PROJECT_ROOT)/exectable_data/gist1m/1000k/gist_1000k.index \
 		--result_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/1000k/results/results_1000k \
 		--M 32
+
+# PQ compression mode args (250k dataset - working configuration)
+# PQ_ARGS = --data_path_comp $(PROJECT_ROOT)/exectable_data/gist1m/250k/gist_base_250k.bin \
+# 		--query_path $(PROJECT_ROOT)/exectable_data/gist1m/250k/gist_query_250k.bin \
+# 		--index_path $(PROJECT_ROOT)/exectable_data/gist1m/250k/gist_250k.index \
+# 		--result_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/250k/results/results_pq \
+# 		--range_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/250k/query_ranges/query_ranges_250k \
+# 		--groundtruth_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/250k/groundtruth/groundtruth_250k \
+# 		--pq_model_out $(PROJECT_ROOT)/exectable_data/gist1m/250k/pq/gist_250k_pq_m320.faiss \
+# 		--pq_codes_out $(PROJECT_ROOT)/exectable_data/gist1m/250k/pq/gist_250k_codes_m320.bin \
+# 		--M_compression_spaces 320 \
+# 		--graph_M 32
+
+PQ_ARGS = --data_path_comp $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_base_500k.bin \
+		--query_path $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_query_500k.bin \
+		--index_path $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_500k.index \
+		--result_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/results/results_pq \
+		--range_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/query_ranges/query_ranges_500k \
+		--groundtruth_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/groundtruth/groundtruth_500k \
+		--pq_model_out $(PROJECT_ROOT)/exectable_data/gist1m/500k/pq/gist_500k_pq_m320.faiss \
+		--pq_codes_out $(PROJECT_ROOT)/exectable_data/gist1m/500k/pq/gist_500k_codes_m320.bin \
+		--M_compression_spaces 320 \
+		--graph_M 32
 
 # ARGS = --data_path $(PROJECT_ROOT)/exectable_data/audi/yt_aud_sorted_vec_by_attr.bin \
 #        --query_path $(PROJECT_ROOT)/exectable_data/audi/yt_aud_ranged_queries.bin \
@@ -90,7 +113,7 @@ run: $(TARGET)
 	$(TARGET) $(ARGS)
 
 run_pq: $(PQ_TARGET)
-	$(PQ_TARGET) $(ARGS)
+	$(PQ_TARGET) $(PQ_ARGS)
 
 run_optimized_test:
 	$(MAKE) optimized_test DIST_THREADS_PER_NEIGHBOR=$(DIST_THREADS_PER_NEIGHBOR) -B

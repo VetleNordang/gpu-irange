@@ -117,10 +117,6 @@ __global__ void irange_search_kernel_pq(
         int num_filtered = range_filter_gpu(gpu_index.d_segment_tree.d_nodes, 0, ql, qr,
                                             filtered_indices, 100);
 
-        if (query_id == 0) {
-            printf("Query %d Suffix %d: Range [%d, %d] -> %d filtered nodes (PQ)\n",
-                   query_id, suffix_id, ql, qr, num_filtered);
-        }
 
         for (int f = 0; f < num_filtered; f++) {
             GPUNode seg_node  = gpu_index.d_segment_tree.d_nodes[filtered_indices[f]];
