@@ -21,6 +21,10 @@ if(ENABLE_FAISS)
 		target_include_directories(pq_encode PRIVATE ${FAISS_INCLUDE_DIR})
 		target_link_libraries(pq_encode PRIVATE ${FAISS_LIBRARY} ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES} OpenMP::OpenMP_CXX ${CUDA_LIBRARIES})
 
+		add_executable(pq_compress_only pq_compress_only.cpp)
+		target_include_directories(pq_compress_only PRIVATE ${FAISS_INCLUDE_DIR})
+		target_link_libraries(pq_compress_only PRIVATE ${FAISS_LIBRARY} ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES} OpenMP::OpenMP_CXX)
+
 		add_executable(pq_manual_distance pq_manual_distance.cpp)
 		target_include_directories(pq_manual_distance PRIVATE ${FAISS_INCLUDE_DIR})
 		target_link_libraries(pq_manual_distance PRIVATE ${FAISS_LIBRARY} ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES} OpenMP::OpenMP_CXX)

@@ -132,7 +132,6 @@ namespace iRangeGraph
             pq_nbits_ = nbits;
             pq_model_ = pq_model;
             use_pq_ = true;
-            std::cout << "Loaded PQ codes: " << max_elements_ << " vectors, code_size=" << code_size << std::endl;
         }
 
         // Helper: Extract nbits bits from byte array at given bit offset

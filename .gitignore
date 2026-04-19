@@ -10,3 +10,7 @@ exectable_data
 
 cude_version/build
 cude_version/build/*
+
+# Logs
+logs
+logs/*

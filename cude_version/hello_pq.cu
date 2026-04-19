@@ -220,11 +220,10 @@ void load_index_compact_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GP
     }
     
     // Extract adjacency lists without padding
-    char* dst = host_buffer;
     for (int i = 0; i < data_points; i++) {
         char* src = (char*)index.data_memory_ + i * size_data_per_element;
+        char* dst = host_buffer + i * size_links_per_element;  // Calculate offset directly
         memcpy(dst, src, size_links_per_element);
-        dst += size_links_per_element;
     }
     
     // Transfer to GPU in one go
@@ -506,7 +505,8 @@ void write_results_to_csv(const std::string& saveprefix, int suffix,
     }
 }
 
-void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<int> SearchEF, std::string saveprefix) {
+void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<int> SearchEF, std::string saveprefix, 
+                   faiss::ProductQuantizer* pq_model, PQCodesBlob& pq_blob) {
     // Validate all SearchEF values are within supported range
     for (int ef : SearchEF) {
         if (ef > MAX_SEARCH_EF) {
@@ -519,25 +519,16 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     GPUIndex gpu_index;
 
     
-    if (index.use_pq_) {
-        printf("\n>>> PQ MODE DETECTED: Loading COMPACT adjacency lists only\n");
-        load_index_compact_to_gpu(index, gpu_index, paths["index"]);
-    } else {
-        printf("\n>>> NORMAL MODE: Loading full index (embeddings + adjacency lists)\n");
-        load_index_to_gpu(index, gpu_index);
-    }
-    
+
+    printf("\n>>> PQ MODE DETECTED: Loading COMPACT adjacency lists only\n");
+    load_index_compact_to_gpu(index, gpu_index, paths["index"]);
+   
     // Load segment tree to GPU
     load_segment_tree_to_gpu(index, gpu_index);
     load_queries_to_gpu(index, gpu_index);
     make_result_buffer_on_gpu(index, gpu_index);
 
-    iRangeGraph::DataLoader *storage = index.storage;
-
-    std::unique_ptr<faiss::ProductQuantizer> pq_model = load_pq_model(paths["pq_model"]);
-    PQCodesBlob pq_blob = load_pq_codes(paths["pq_codes"]);
-
-    load_pq_model_to_gpu(gpu_index, pq_model.get());
+    load_pq_model_to_gpu(gpu_index, pq_model);
     load_pq_codes_to_gpu(gpu_index, pq_blob.codes, pq_blob.n, pq_blob.M, pq_blob.code_size, pq_model->ksub, pq_model->dsub);
     
     // ===== PRINT GPU MEMORY SUMMARY =====
@@ -595,10 +586,10 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     
     // Iterate over all suffixes in storage->query_range (same as CPU version)
     size_t suffix_idx = 0;
-    for (auto range : storage->query_range) {
+    for (auto range : index.storage->query_range) {
         int suffix = range.first;
         printf("\n========================================\n");
-        printf("Processing suffix %d (%zu/%zu)\n", suffix, suffix_idx + 1, storage->query_range.size());
+        printf("Processing suffix %d (%zu/%zu)\n", suffix, suffix_idx + 1, index.storage->query_range.size());
         printf("========================================\n");
         
         // Clear results for this suffix
@@ -652,17 +643,10 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             cudaEventCreate(&stop);
             cudaEventRecord(start);
             
-            if (gpu_index.use_pq) {
-                irange_search_kernel_pq<<<num_blocks, threads_per_block>>>(
-                    gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx, d_hops, d_dist_comps,
-                    index.size_links_per_layer_, kernel_seed
-                );
-            } else {
-                irange_search_kernel<<<num_blocks, threads_per_block>>>(
-                    gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx, d_hops, d_dist_comps,
-                    index.size_links_per_layer_, kernel_seed
-                );
-            }
+            irange_search_kernel_pq<<<num_blocks, threads_per_block>>>(
+                gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx, d_hops, d_dist_comps,
+                index.size_links_per_layer_, kernel_seed
+            );
             
             cudaEventRecord(stop);
             cudaEventSynchronize(stop);
@@ -859,7 +843,7 @@ int main(int argc, char **argv) {
     index.load_pq_codes(pq_blob_for_flag.codes, pq_blob_for_flag.code_size, 
                         pq_blob_for_flag.M, pq_blob_for_flag.nbits, pq_model_for_flag.get());
     
-    search_on_gpu(index, SearchEF_values, paths["result_saveprefix"]);
+    search_on_gpu(index, SearchEF_values, paths["result_saveprefix"], pq_model_for_flag.get(), pq_blob_for_flag);
     
     
     printf("\n========================================\n");

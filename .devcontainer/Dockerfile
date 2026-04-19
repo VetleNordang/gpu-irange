@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     libfaiss-dev \
     python3-faiss \
+    tree \
     && rm -rf /var/lib/apt/lists/*
 
 RUN ln -sf /usr/bin/python3 /usr/local/bin/python || true \

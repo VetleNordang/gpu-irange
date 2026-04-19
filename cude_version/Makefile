@@ -50,13 +50,13 @@ endif
 # 		--index_file $(PROJECT_ROOT)/exectable_data/gist1m/750k/gist_750k.index \
 # 		--result_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/750k/results/results_750k \
 # 		--M 32
-# Normal distance computation args (1000k dataset)
-ARGS = --data_path $(PROJECT_ROOT)/exectable_data/gist1m/1000k/gist_base_1000k.bin \
-		--query_path $(PROJECT_ROOT)/exectable_data/gist1m/1000k/gist_query_1000k.bin \
-		--range_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/1000k/query_ranges/query_ranges_1000k \
-		--groundtruth_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/1000k/groundtruth/groundtruth_1000k \
-		--index_file $(PROJECT_ROOT)/exectable_data/gist1m/1000k/gist_1000k.index \
-		--result_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/1000k/results/results_1000k \
+# Normal distance computation args (500k dataset)
+ARGS = --data_path $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_base_500k.bin \
+		--query_path $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_query_500k.bin \
+		--range_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/query_ranges/query_ranges_500k \
+		--groundtruth_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/groundtruth/groundtruth_500k \
+		--index_file $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_500k.index \
+		--result_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/results/results_500k \
 		--M 32
 
 # PQ compression mode args (250k dataset - working configuration)
@@ -74,7 +74,7 @@ ARGS = --data_path $(PROJECT_ROOT)/exectable_data/gist1m/1000k/gist_base_1000k.b
 PQ_ARGS = --data_path_comp $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_base_500k.bin \
 		--query_path $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_query_500k.bin \
 		--index_path $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_500k.index \
-		--result_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/results/results_pq \
+		--result_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/results/pq/results_pq \
 		--range_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/query_ranges/query_ranges_500k \
 		--groundtruth_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/groundtruth/groundtruth_500k \
 		--pq_model_out $(PROJECT_ROOT)/exectable_data/gist1m/500k/pq/gist_500k_pq_m320.faiss \
