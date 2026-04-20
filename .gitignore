@@ -14,3 +14,5 @@ cude_version/build/*
 # Logs
 logs
 logs/*
+
+my_kernel_metrics.csv

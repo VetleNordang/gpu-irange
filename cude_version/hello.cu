@@ -9,6 +9,7 @@
 #include <chrono>
 #include <map>
 #include <tuple>
+#include <cuda_profiler_api.h>
 #include "iRG_search.h"
 #include <curand_kernel.h>
 #include "gpu_index.cuh"
@@ -269,6 +270,8 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     // Map: suffix -> vector of (SearchEF, Recall, QPS, DCO, HOP)
     std::map<int, std::vector<std::tuple<int, float, float, float, float>>> all_results;
     
+    int limit_tests = 0; // Added for profiler auto-shutdown
+
     // Iterate over all suffixes in storage->query_range (same as CPU version)
     size_t suffix_idx = 0;
     for (auto range : storage->query_range) {
@@ -280,6 +283,11 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
         
 
         for (int ef : SearchEF) {
+            limit_tests++;
+            if (limit_tests > 11) {
+                cudaProfilerStop();
+            }
+
             printf("\n--- Testing EF=%d for suffix %d ---\n", ef, suffix);
             printf("\n=== Initializing Visited Array for Search ===\n");
             int query_nb = index.storage->query_nb;
