@@ -1,7 +1,7 @@
 #pragma once
 
 #ifndef THREADS_PER_QUERY
-#define THREADS_PER_QUERY     256
+#define THREADS_PER_QUERY     512
 #endif
 
 #include <cuda_runtime.h>
@@ -265,10 +265,10 @@ __device__ unsigned int xorshift32(unsigned int* state) {
 //   - 4 queries per block so __syncthreads() is still safe because warps handle logic cooperatively.
 
 #ifndef DIST_THREADS_PER_NEIGHBOR
-#define DIST_THREADS_PER_NEIGHBOR 8
+#define DIST_THREADS_PER_NEIGHBOR 16
 #endif
 
-#define THREADS_PER_QUERY     256
+#define THREADS_PER_QUERY     512
 #define MAX_QUERIES_PER_BLOCK   1  // 4 queries per block of 128 threads
 
 #if (THREADS_PER_QUERY % DIST_THREADS_PER_NEIGHBOR) != 0
