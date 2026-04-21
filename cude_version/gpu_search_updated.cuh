@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef THREADS_PER_QUERY
+#define THREADS_PER_QUERY     128
+#endif
+
 #include <cuda_runtime.h>
 #include <float.h>
 #include <stdint.h>
@@ -150,86 +154,97 @@ __device__ int GetOverLap(int l, int r, int ql, int qr) {
     return R - L + 1;
 }
 
-// SelectEdge: Navigate segment tree to find edges at appropriate depths (matching CPU logic)
+// SelectEdge: Navigate segment tree to find edges collaboratively
 __device__ void SelectEdge_gpu(int pid, int ql, int qr, int edge_limit,
                                 GPUNode* d_nodes, int root_idx,
                                 char* data_memory, size_t size_data_per_element,
                                 size_t size_links_per_layer,
                                 GPUVisitedArray visited, int query_id,
-                                int* output_edges, int* output_count) {
-    *output_count = 0;
+                                int* output_edges, int* output_count, int lane_id) {
+    __shared__ int s_cur_idx;
+    __shared__ int s_nxt_idx;
+    __shared__ int s_neighbor_count;
+    __shared__ int* s_neighbors;
+    __shared__ GPUNode s_cur_node;
     
-    // Start from root and navigate to find node containing pid
-    int cur_idx = root_idx;
-    int nxt_idx = root_idx;
-    GPUNode cur_node;  // Declare here so it's visible for the outer while condition
+    if (lane_id == 0) {
+        *output_count = 0;
+        s_cur_idx = root_idx;
+        s_nxt_idx = root_idx;
+    }
+    __syncthreads();
     
-    do {
-        cur_idx = nxt_idx;
-        cur_node = d_nodes[cur_idx];
-        
-        // Inner loop: keep descending while overlap doesn't change
-        bool contain = false;
-        do {
-            contain = false;
+    __shared__ bool s_done;
+    if (lane_id == 0) s_done = false;
+    __syncthreads();
+    while (!s_done) {
+        if (lane_id == 0) {
+            s_cur_idx = s_nxt_idx;
+            s_cur_node = d_nodes[s_cur_idx];
             
-            // Find child containing pid
-            nxt_idx = -1;
-            if (!cur_node.is_leaf) {
-                // Check left child
-                if (cur_node.left_child_index != -1) {
-                    GPUNode left_child = d_nodes[cur_node.left_child_index];
-                    if (left_child.lbound <= pid && left_child.rbound >= pid) {
-                        nxt_idx = cur_node.left_child_index;
+            bool contain = false;
+            do {
+                contain = false;
+                s_nxt_idx = -1;
+                if (!s_cur_node.is_leaf) {
+                    if (s_cur_node.left_child_index != -1) {
+                        GPUNode left_child = d_nodes[s_cur_node.left_child_index];
+                        if (left_child.lbound <= pid && left_child.rbound >= pid) {
+                            s_nxt_idx = s_cur_node.left_child_index;
+                        }
                     }
-                }
-                // Check right child if left didn't match
-                if (nxt_idx == -1 && cur_node.right_child_index != -1) {
-                    GPUNode right_child = d_nodes[cur_node.right_child_index];
-                    if (right_child.lbound <= pid && right_child.rbound >= pid) {
-                        nxt_idx = cur_node.right_child_index;
+                    if (s_nxt_idx == -1 && s_cur_node.right_child_index != -1) {
+                        GPUNode right_child = d_nodes[s_cur_node.right_child_index];
+                        if (right_child.lbound <= pid && right_child.rbound >= pid) {
+                            s_nxt_idx = s_cur_node.right_child_index;
+                        }
                     }
-                }
-                
-                // If found child and overlap is same, continue descending
-                if (nxt_idx != -1) {
-                    GPUNode nxt_node = d_nodes[nxt_idx];
-                    int cur_overlap = GetOverLap(cur_node.lbound, cur_node.rbound, ql, qr);
-                    int nxt_overlap = GetOverLap(nxt_node.lbound, nxt_node.rbound, ql, qr);
                     
-                    if (cur_overlap == nxt_overlap) {
-                        cur_idx = nxt_idx;
-                        cur_node = nxt_node;
-                        contain = true;
+                    if (s_nxt_idx != -1) {
+                        GPUNode nxt_node = d_nodes[s_nxt_idx];
+                        int cur_overlap = GetOverLap(s_cur_node.lbound, s_cur_node.rbound, ql, qr);
+                        int nxt_overlap = GetOverLap(nxt_node.lbound, nxt_node.rbound, ql, qr);
+                        
+                        if (cur_overlap == nxt_overlap) {
+                            s_cur_idx = s_nxt_idx;
+                            s_cur_node = nxt_node;
+                            contain = true;
+                        }
+                    }
+                }
+            } while (contain);
+            
+            s_neighbors = get_linklist_gpu(pid, s_cur_node.depth, data_memory, 
+                                             size_data_per_element, size_links_per_layer,
+                                             &s_neighbor_count);
+        }
+        __syncthreads();
+        
+        // Cooperative visited checking
+        for (int i = lane_id; i < s_neighbor_count; i += THREADS_PER_QUERY) {
+            if (*output_count >= edge_limit) continue;
+            int neighbor_id = s_neighbors[i];
+            
+            if (neighbor_id >= ql && neighbor_id <= qr) {
+                if (!isVisited(visited, query_id, neighbor_id)) {
+                    int pos = atomicAdd(output_count, 1);
+                    if (pos < edge_limit) {
+                        output_edges[pos] = neighbor_id;
+                    } else {
+                        atomicSub(output_count, 1); // Rollback
                     }
                 }
             }
-        } while (contain);
-        
-        // Get edges for pid at this depth (cur_node.depth)
-        int neighbor_count = 0;
-        int* neighbors = get_linklist_gpu(pid, cur_node.depth, data_memory, 
-                                         size_data_per_element, size_links_per_layer,
-                                         &neighbor_count);
-        
-        // Filter neighbors by range and visited status
-        for (int i = 0; i < neighbor_count && *output_count < edge_limit; i++) {
-            int neighbor_id = neighbors[i];
-            
-            // Check if in range
-            if (neighbor_id < ql || neighbor_id > qr) continue;
-            
-            // Check if visited
-            if (isVisited(visited, query_id, neighbor_id)) continue;
-            
-            output_edges[(*output_count)++] = neighbor_id;
         }
+        __syncthreads();
         
-        // Return if we've collected enough edges
-        if (*output_count >= edge_limit) return;
-        
-        // Continue while cur_node's bounds are not completely within [ql, qr]
-    } while (cur_node.lbound < ql || cur_node.rbound > qr);
+        if (lane_id == 0) {
+            if (*output_count >= edge_limit || (s_cur_node.lbound >= ql && s_cur_node.rbound <= qr)) {
+                s_done = true;
+            }
+        }
+        __syncthreads();
+    }
 }
 
 // Simple random number generator for GPU
@@ -247,17 +262,14 @@ __device__ unsigned int xorshift32(unsigned int* state) {
 //   - Lane 0 owns the heap, SelectEdge, loop control, and result writing.
 //   - All 128 threads split each distance across DIST_THREADS_PER_NEIGHBOR=4 threads.
 //   - NEIGHBORS_PER_BATCH = 128/4 = 32, matching M=32 exactly (no idle lanes).
-//   - 1 query per block so __syncthreads() is always safe.
+//   - 4 queries per block so __syncthreads() is still safe because warps handle logic cooperatively.
 
-#define THREADS_PER_QUERY     128
-#define MAX_QUERIES_PER_BLOCK   1  // 1 query per block of 128 threads
-
-// Distance parallelization mode (compile-time switch):
-// 1 = one thread computes one full distance (max neighbour parallelism)
-// 4 = four threads cooperate per distance (more per-distance parallelism)
 #ifndef DIST_THREADS_PER_NEIGHBOR
 #define DIST_THREADS_PER_NEIGHBOR 4
 #endif
+
+#define THREADS_PER_QUERY     128
+#define MAX_QUERIES_PER_BLOCK   1  // 4 queries per block of 128 threads
 
 #if (THREADS_PER_QUERY % DIST_THREADS_PER_NEIGHBOR) != 0
 #error "DIST_THREADS_PER_NEIGHBOR must divide THREADS_PER_QUERY"
@@ -290,8 +302,8 @@ __global__ void irange_search_kernel(
     // s_edges    : up to NEIGHBORS_PER_BATCH (32) neighbour IDs from SelectEdge
     // s_dists    : final distances written by lane-in-group==0 after reduction
     // s_num_edges: set by lane 0; -1 signals loop termination
-    __shared__ int   s_edges    [MAX_QUERIES_PER_BLOCK][NEIGHBORS_PER_BATCH];
-    __shared__ float s_dists    [MAX_QUERIES_PER_BLOCK][NEIGHBORS_PER_BATCH];
+    __shared__ int   s_edges    [MAX_QUERIES_PER_BLOCK][32];
+    __shared__ float s_dists    [MAX_QUERIES_PER_BLOCK][32];
     __shared__ int   s_num_edges[MAX_QUERIES_PER_BLOCK];
 
     // --- Per-query values readable by all lanes ---
@@ -300,9 +312,10 @@ __global__ void irange_search_kernel(
     int    ql           = gpu_index.d_query_range[range_idx];
     int    qr           = gpu_index.d_query_range[range_idx + 1];
 
-    // --- Heap storage in per-thread local memory (only lane 0 uses it) ---
-    HeapNode candidate_buffer    [MAX_SEARCH_EF];
-    HeapNode top_candidate_buffer[MAX_SEARCH_EF];
+    // --- Heap storage in shared memory to avoid local memory thrashing ---
+    __shared__ HeapNode s_candidate_buffer[MAX_QUERIES_PER_BLOCK * MAX_SEARCH_EF];
+    __shared__ HeapNode s_top_candidate_buffer[MAX_QUERIES_PER_BLOCK * MAX_SEARCH_EF];
+    
     MinHeap  candidate_set;
     MaxHeap  top_candidates;
     float    lowerBound     = FLT_MAX;
@@ -313,8 +326,8 @@ __global__ void irange_search_kernel(
     // Phase 1 - Entry-point seeding (lane 0 only)
     // =========================================================
     if (lane_id == 0) {
-        candidate_set.init(candidate_buffer,     MAX_SEARCH_EF);
-        top_candidates.init(top_candidate_buffer, SearchEF + 1);
+        candidate_set.init(&s_candidate_buffer[warp_in_blk * MAX_SEARCH_EF], MAX_SEARCH_EF);
+        top_candidates.init(&s_top_candidate_buffer[warp_in_blk * MAX_SEARCH_EF], SearchEF + 1);
 
         unsigned int rng_state = (unsigned int)(seed + query_id);
 
@@ -367,6 +380,8 @@ __global__ void irange_search_kernel(
     //  f) Lane 0 reads batched s_dists[], marks visited, inserts into heaps.
 
     while (true) {
+        __shared__ int s_current_id;
+        
         // --- (a) Lane 0: advance one greedy step ---
         if (lane_id == 0) {
             if (candidate_set.empty()) {
@@ -378,19 +393,24 @@ __global__ void irange_search_kernel(
                     s_num_edges[warp_in_blk] = -1;        // stop: below bound
                 } else {
                     candidate_set.pop();
-                    // SelectEdge writes directly into shared memory (at most NEIGHBORS_PER_BATCH=32)
-                    SelectEdge_gpu(current.id, ql, qr, NEIGHBORS_PER_BATCH,
-                                   gpu_index.d_segment_tree.d_nodes, 0,
-                                   gpu_index.d_data_memory,
-                                   gpu_index.d_size_data_per_element,
-                                   size_links_per_layer,
-                                   visited, query_id,
-                                   s_edges[warp_in_blk], &s_num_edges[warp_in_blk]);
+                    s_current_id = current.id;
+                    s_num_edges[warp_in_blk] = 0; // ready to extract
                 }
             }
         }
 
         // --- (b) Sync: all 128 threads can now read s_num_edges / s_edges ---
+        __syncthreads();
+        
+        if (s_num_edges[warp_in_blk] != -1) {
+            SelectEdge_gpu(s_current_id, ql, qr, 32,
+                           gpu_index.d_segment_tree.d_nodes, 0,
+                           gpu_index.d_data_memory,
+                           gpu_index.d_size_data_per_element,
+                           size_links_per_layer,
+                           visited, query_id,
+                           s_edges[warp_in_blk], &s_num_edges[warp_in_blk], lane_id);
+        }
         __syncthreads();
 
         // --- (c) Termination check (all lanes) ---
