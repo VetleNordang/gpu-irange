@@ -77,8 +77,8 @@ PQ_ARGS = --data_path_comp $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_base_
 		--result_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/results/pq/results_pq \
 		--range_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/query_ranges/query_ranges_500k \
 		--groundtruth_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/groundtruth/groundtruth_500k \
-		--pq_model_out $(PROJECT_ROOT)/exectable_data/gist1m/500k/pq/gist_500k_pq_m320.faiss \
-		--pq_codes_out $(PROJECT_ROOT)/exectable_data/gist1m/500k/pq/gist_500k_codes_m320.bin \
+		--pq_model_out $(PROJECT_ROOT)/exectable_data/gist1m/500k/pq/gist_500k_pq_m320_nb9.faiss\
+		--pq_codes_out $(PROJECT_ROOT)/exectable_data/gist1m/500k/pq/gist_500k_pq_codes_m320_nb9.bin \
 		--M_compression_spaces 320 \
 		--graph_M 32
 
