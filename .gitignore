@@ -10,3 +10,12 @@ exectable_data
 
 cude_version/build
 cude_version/build/*
+
+# Logs
+logs
+logs/*
+
+my_kernel_metrics*
+OPTIMIZER_METRICS*
+OPTIMIZATION_REPORT*
+PROSPECTIVE_OPTIMIZATION*
