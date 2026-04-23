@@ -31,7 +31,7 @@ RUN pip3 install --no-cache-dir \
     pandas \
     matplotlib
 
-
+RUN useradd -m -s /bin/bash -u 904 vetlean
 # [Optional] Uncomment this section to install additional vcpkg ports.
 # RUN su vscode -c "${VCPKG_ROOT}/vcpkg install <your-port-name-here>"
 

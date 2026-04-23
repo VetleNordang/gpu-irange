@@ -15,7 +15,9 @@ cude_version/build/*
 logs
 logs/*
 
-my_kernel_metrics*
 OPTIMIZER_METRICS*
-OPTIMIZATION_REPORT*
-PROSPECTIVE_OPTIMIZATION*
+cude_version/OPTIMIZATION*
+cude_version/my_kernel*
+OPTIMIZATION*
+my_kernel*
+PROSPECTIVE_OPTIMIZATIONS*
