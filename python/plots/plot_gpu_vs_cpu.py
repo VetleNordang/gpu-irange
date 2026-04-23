@@ -171,6 +171,50 @@ def plot_methods_comparison(cpu_df, gpu_normal_df, gpu_pq_df, dataset_name, outp
         plt.close()
         print(f"  ✓ Saved plot: {output_dir / 'qps_methods_comparison.png'}")
 
+    # Plot 3: Speedup (GPU Normal vs CPU) vs SearchEF
+    fig, ax = plt.subplots(figsize=(10, 8))
+    plotted_any_speedup = False
+    
+    if cpu_df is not None and gpu_normal_df is not None:
+        for suffix in TARGET_SUFFIXES:
+            cpu_series = get_series_by_suffix(cpu_df, suffix)
+            gpu_series = get_series_by_suffix(gpu_normal_df, suffix)
+            
+            if cpu_series is not None and gpu_series is not None:
+                # Align indices (SearchEF)
+                common_efs = cpu_series.index.intersection(gpu_series.index)
+                if not common_efs.empty:
+                    speedup = gpu_series.loc[common_efs, 'QPS'] / cpu_series.loc[common_efs, 'QPS']
+                    
+                    ax.plot(
+                        common_efs, 
+                        speedup, 
+                        marker=suffix_markers[suffix],
+                        linestyle='-',
+                        color="tab:red",
+                        label=f'Speedup - Range {suffix}',
+                        linewidth=2,
+                        markersize=8,
+                        alpha=0.8
+                    )
+                    plotted_any_speedup = True
+
+    if not plotted_any_speedup:
+        print(f"  Warning: No data available to plot Speedup for {dataset_name}")
+        plt.close()
+    else:
+        ax.set_xlabel('SearchEF', fontsize=12)
+        ax.set_ylabel('Speedup (GPU Normal QPS / CPU QPS)', fontsize=12)
+        ax.set_title(f'{dataset_name}: GPU Normal Speedup over CPU (Ranges 2, 5, 8)', fontsize=14, fontweight='bold')
+        ax.legend(fontsize=10, bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax.grid(True, alpha=0.3)
+        ax.set_xscale('log')
+        # Linear scale for speedup
+        plt.tight_layout()
+        plt.savefig(output_dir / "speedup_comparison.png", dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"  ✓ Saved plot: {output_dir / 'speedup_comparison.png'}")
+
 def main():
     print("=" * 60)
     print("CPU vs GPU Normal vs GPU PQ Performance Comparison")

@@ -97,6 +97,7 @@ void load_index_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &
     int dimension = index.storage->Dim;
     int data_points = index.max_elements_;
     size_t total_index_memory = (size_t)data_points * index.size_data_per_element_;
+printf("Attempting to allocate %.2f MB for index\n", total_index_memory / (1024.0 * 1024.0));
     
     // Set metadata
     gpu_index.d_dim = dimension;
@@ -108,7 +109,7 @@ void load_index_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &
     cudaError_t err = cudaMalloc((void**)&gpu_index.d_data_memory, total_index_memory);
     if (err != cudaSuccess) {
         printf("CudaMalloc failed: %s\n", cudaGetErrorString(err));
-        return;
+        exit(1);
     }
     
     // Copy entire index structure from CPU to GPU
@@ -116,7 +117,7 @@ void load_index_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &
     if (err != cudaSuccess) {
         printf("CudaMemcpy failed: %s\n", cudaGetErrorString(err));
         cudaFree(gpu_index.d_data_memory);
-        return;
+        exit(1);
     }
     printf("✓ Copied %.2f GB from CPU to GPU\n", 
             total_index_memory / (1024.0*1024.0*1024.0));
@@ -137,7 +138,7 @@ void load_segment_tree_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPU
     cudaError_t err = cudaMalloc((void**)&gpu_index.d_segment_tree.d_nodes, mem_to_allocate_to_gpu);
     if (err != cudaSuccess) {
         printf("CudaMalloc failed for segment tree: %s\n", cudaGetErrorString(err));
-        return;
+        exit(1);
     }
 
     // Copy nodes to GPU
@@ -145,7 +146,7 @@ void load_segment_tree_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPU
     if (err != cudaSuccess) {
         printf("CudaMemcpy failed for segment tree: %s\n", cudaGetErrorString(err));
         cudaFree(gpu_index.d_segment_tree.d_nodes);
-        return;
+        exit(1);
     }
     
     printf("✓ Copied %zu nodes (%.2f KB) to GPU\n", 
@@ -170,7 +171,7 @@ void load_queries_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex
     cudaError_t err = cudaMalloc((void**)&gpu_index.d_query_vectors, query_vectors_size);
     if (err != cudaSuccess) {
         printf("CudaMalloc failed for query vectors: %s\n", cudaGetErrorString(err));
-        return;
+        exit(1);
     }
     
     float *flatten_queries = new float[query_nb * dim];
@@ -186,7 +187,7 @@ void load_queries_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex
         printf("CudaMemcpy failed for query vectors: %s\n", cudaGetErrorString(err));
         cudaFree(gpu_index.d_query_vectors);
         delete[] flatten_queries;
-        return;
+        exit(1);
     }
     
     // Allocate GPU memory for query ranges
@@ -200,7 +201,7 @@ void load_queries_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex
     if (err != cudaSuccess) {
         printf("CudaMalloc failed for query ranges: %s\n", cudaGetErrorString(err));
         delete[] flatten_queries;
-        return;
+        exit(1);
     }
     
     int *flatten_ranges = new int[query_nb * 2 * suffix_keys.size()];
@@ -219,7 +220,7 @@ void load_queries_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex
         cudaFree(gpu_index.d_query_range);
         delete[] flatten_queries;
         delete[] flatten_ranges;
-        return;
+        exit(1);
     }
     
     delete[] flatten_queries;
@@ -249,7 +250,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
         if (ef > MAX_SEARCH_EF) {
             printf("ERROR: SearchEF=%d exceeds MAX_SEARCH_EF=%d\n", ef, MAX_SEARCH_EF);
             printf("Please increase MAX_SEARCH_EF in gpu_search_updated.cuh or reduce SearchEF\n");
-            return;
+            exit(1);
         }
     }
 
@@ -298,7 +299,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             cudaError_t err = initGPUVisitedArray(visited, query_nb, max_elements);
             if (err != cudaSuccess) {
                 printf("Failed to initialize visited array: %s\n", cudaGetErrorString(err));
-                return;
+                exit(1);
             }
             printf("✓ Allocated %.2f MB for visited arrays (%d queries)\n", 
                    visited.total_size() / (1024.0*1024.0), query_nb);
@@ -309,13 +310,18 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             cudaMalloc(&d_hops, query_nb * sizeof(int));
             cudaMalloc(&d_dist_comps, query_nb * sizeof(int));
             
+            HeapNode* d_candidate_buffer;
+            HeapNode* d_top_candidate_buffer;
+            cudaMalloc(&d_candidate_buffer, query_nb * MAX_SEARCH_EF * sizeof(HeapNode));
+            cudaMalloc(&d_top_candidate_buffer, query_nb * MAX_SEARCH_EF * sizeof(HeapNode));
+
             // Initialize to zero (CRITICAL - otherwise contains garbage values!)
             cudaMemset(d_hops, 0, query_nb * sizeof(int));
             cudaMemset(d_dist_comps, 0, query_nb * sizeof(int));
             
-            int threads_per_block = THREADS_PER_QUERY;   // 128: 1 query per block
-            int threads_per_query = THREADS_PER_QUERY;   // 128 threads collaborate on each query
-            int queries_per_block = threads_per_block / threads_per_query;  // = 1
+            int queries_per_block = MAX_QUERIES_PER_BLOCK;
+            int threads_per_query = THREADS_PER_QUERY;
+            int threads_per_block = threads_per_query * queries_per_block;
             int num_blocks = (query_nb + queries_per_block - 1) / queries_per_block;
             
             printf("Configuration: %d blocks × %d threads, Queries: %d, K: %d\n", 
@@ -352,7 +358,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             err = cudaGetLastError();
             if (err != cudaSuccess) {
                 printf("Search kernel error: %s\n", cudaGetErrorString(err));
-                continue;
+                exit(1);
             }
             
             // Copy results back to CPU
@@ -427,6 +433,8 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             // Clean up
             cudaFree(d_hops);
             cudaFree(d_dist_comps);
+            cudaFree(d_candidate_buffer);
+            cudaFree(d_top_candidate_buffer);
             freeGPUVisitedArray(visited);
             
         }
