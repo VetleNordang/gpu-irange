@@ -6,6 +6,7 @@
 #include <iostream>
 #include <fstream>
 #include <algorithm>
+#include <iomanip>
 #include <chrono>
 #include <map>
 #include <tuple>
@@ -267,21 +268,24 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     iRangeGraph::DataLoader *storage = index.storage;
 
     
-    // Structure to store all results in memory before writing to disk
-    // Map: suffix -> vector of (SearchEF, Recall, QPS, DCO, HOP)
-    std::map<int, std::vector<std::tuple<int, float, float, float, float>>> all_results;
-    
     int limit_tests = 0; // Added for profiler auto-shutdown
 
     // Iterate over all suffixes in storage->query_range (same as CPU version)
     size_t suffix_idx = 0;
     for (auto range : storage->query_range) {
         int suffix = range.first;
-        printf("\n========================================\n");
-        printf("Processing suffix %d (%zu/%zu)\n", suffix, suffix_idx + 1, storage->query_range.size());
-        printf("========================================\n");
-        std::cout << "suffix = " << suffix << std::endl;
-        
+        std::cout << "suffix" << suffix << std::endl;
+
+        std::string savepath = saveprefix + std::to_string(suffix) + "_gpu.csv";
+        CheckPath(savepath);
+        std::ofstream outfile(savepath);
+        if (!outfile.is_open()) {
+            printf("✗ Failed to open %s — results for suffix %d will not be saved\n", savepath.c_str(), suffix);
+        } else {
+            outfile << std::fixed << std::setprecision(6);
+            outfile << "SearchEF,Recall,QPS,DCO,HOP\n";
+            outfile.flush();
+        }
 
         for (int ef : SearchEF) {
             limit_tests++;
@@ -289,8 +293,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
                 cudaProfilerStop();
             }
 
-            printf("\n--- Testing EF=%d for suffix %d ---\n", ef, suffix);
-            printf("\n=== Initializing Visited Array for Search ===\n");
+           
             int query_nb = index.storage->query_nb;
             int max_elements = index.max_elements_;
             int dim = index.storage->Dim;
@@ -301,8 +304,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
                 printf("Failed to initialize visited array: %s\n", cudaGetErrorString(err));
                 exit(1);
             }
-            printf("✓ Allocated %.2f MB for visited arrays (%d queries)\n", 
-                   visited.total_size() / (1024.0*1024.0), query_nb);
+            
             
             // Allocate metrics arrays on GPU
             int* d_hops;
@@ -324,16 +326,17 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             int threads_per_block = threads_per_query * queries_per_block;
             int num_blocks = (query_nb + queries_per_block - 1) / queries_per_block;
             
-            printf("Configuration: %d blocks × %d threads, Queries: %d, K: %d\n", 
-                   num_blocks, threads_per_block, query_nb, query_K);
-            
+        
             // Reset visited counters for new search
             unsigned short* temp_curV = new unsigned short[query_nb];
             for (int i = 0; i < query_nb; i++) temp_curV[i] = 1;
             cudaMemcpy(visited.d_curV, temp_curV, query_nb * sizeof(unsigned short), cudaMemcpyHostToDevice);
             cudaMemset(visited.d_mass, 0, (size_t)query_nb * max_elements * sizeof(unsigned short));
             delete[] temp_curV;
-            
+
+            // Reset result buffer to -1 before each search so stale results from prior EF don't leak
+            cudaMemset(gpu_index.d_results, -1, (size_t)query_nb * query_K * sizeof(int));
+
             // Time the kernel
             cudaEvent_t start, stop;
             cudaEventCreate(&start);
@@ -370,25 +373,26 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             cudaMemcpy(cpu_hops, d_hops, query_nb * sizeof(int), cudaMemcpyDeviceToHost);
             cudaMemcpy(cpu_dist_comps, d_dist_comps, query_nb * sizeof(int), cudaMemcpyDeviceToHost);
             
-            // Compute recall if ground truth is available
-            int tp = 0;
+            // Compute per-query mean recall
+            float recall = 0.0f;
             if (index.storage->groundtruth.count(suffix)) {
                 auto &gt = index.storage->groundtruth[suffix];
                 for (int i = 0; i < query_nb; i++) {
+                    int gt_size = std::min((int)gt[i].size(), query_K);
+                    if (gt_size == 0) continue;
+                    int query_tp = 0;
                     for (int k = 0; k < query_K; k++) {
                         int result_id = cpu_results[i * query_K + k];
-                        if (result_id != -1) {
-                            if (std::find(gt[i].begin(), gt[i].end(), result_id) != gt[i].end()) {
-                                tp++;
-                            }
-                        }
+                        if (result_id != -1 &&
+                            std::find(gt[i].begin(), gt[i].end(), result_id) != gt[i].end())
+                            query_tp++;
                     }
+                    recall += (float)query_tp / gt_size;
                 }
+                recall /= query_nb;
             }
-            
+
             // Calculate metrics
-            float recall = (index.storage->groundtruth.count(suffix)) ? 
-                            (1.0f * tp / query_nb / query_K) : 0.0f;
             float qps = query_nb / searchtime;
             
             long long total_hops = 0;
@@ -399,15 +403,13 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             }
             float avg_hops = (float)total_hops / query_nb;
             float avg_dco = (float)total_dist_comps / query_nb;
+        
             
-            printf("  Recall: %.4f\n", recall);
-            printf("  QPS: %.2f\n", qps);
-            printf("  Avg Distance Computations: %.2f\n", avg_dco);
-            printf("  Avg Hops: %.2f\n", avg_hops);
-            printf("  Search time: %.3f seconds\n", searchtime);
-            
-            // Store results in memory (will write to file later)
-            all_results[suffix].push_back(std::make_tuple(ef, recall, qps, avg_dco, avg_hops));
+            // Write result row immediately
+            if (outfile.is_open()) {
+                outfile << ef << "," << recall << "," << qps << "," << avg_dco << "," << avg_hops << "\n";
+                outfile.flush();
+            }
             
             // Show first 3 query results for this suffix (only for first EF value)
             if (suffix == 0 && ef == SearchEF[0]) {
@@ -439,46 +441,13 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             
         }
 
+        if (outfile.is_open()) {
+            outfile.close();
+            printf("✓ Saved results for suffix %d to %s\n", suffix, savepath.c_str());
+        }
         suffix_idx++;  // Increment for next suffix
 
     }
-
-    // Write all results to CSV files (outside of loops)
-    printf("\n========================================\n");
-    printf("Writing all results to disk...\n");
-    printf("========================================\n");
-    
-    for (const auto& result_entry : all_results) {
-        int suffix = result_entry.first;
-        const auto& results = result_entry.second;
-        
-        std::string savepath = saveprefix + std::to_string(suffix) + "_gpu.csv";
-        CheckPath(savepath);
-        std::ofstream outfile(savepath);
-        
-        if (outfile.is_open()) {
-            // Write header
-            outfile << "SearchEF,Recall,QPS,DCO,HOP\n";
-            
-            // Write all results for this suffix
-            for (const auto& result : results) {
-                int ef = std::get<0>(result);
-                float recall = std::get<1>(result);
-                float qps = std::get<2>(result);
-                float dco = std::get<3>(result);
-                float hop = std::get<4>(result);
-                
-                outfile << ef << "," << recall << "," << qps << "," << dco << "," << hop << "\n";
-            }
-            
-            outfile.close();
-            printf("✓ Saved %zu results to %s\n", results.size(), savepath.c_str());
-        } else {
-            printf("✗ Failed to open %s\n", savepath.c_str());
-        }
-    }
-    
-    printf("✓ All results written to disk\n");
 
 
     // Initialize visited array for all queries
@@ -487,7 +456,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     int size_of_tree = sizeof(iRangeGraph::SegmentTree);
     printf("Size of SegmentTree: %d bytes\n", size_of_tree);
     
-    // Clean up GPU memory
+   // Clean up GPU memory
     if (gpu_index.d_data_memory) cudaFree(gpu_index.d_data_memory);
     if (gpu_index.d_segment_tree.d_nodes) cudaFree(gpu_index.d_segment_tree.d_nodes);
     if (gpu_index.d_query_vectors) cudaFree(gpu_index.d_query_vectors);
