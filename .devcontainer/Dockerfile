@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     libfaiss-dev \
     python3-faiss \
     tree \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
 RUN ln -sf /usr/bin/python3 /usr/local/bin/python || true \
@@ -31,7 +32,11 @@ RUN pip3 install --no-cache-dir \
     pandas \
     matplotlib
 
-RUN useradd -m -s /bin/bash -u 904 vetlean
+RUN useradd -m -s /bin/bash -u 904 vetlean \
+    && echo 'vetlean ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+USER vetlean
+
 # [Optional] Uncomment this section to install additional vcpkg ports.
 # RUN su vscode -c "${VCPKG_ROOT}/vcpkg install <your-port-name-here>"
 
