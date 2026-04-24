@@ -5,7 +5,7 @@
 #
 
 #SBATCH --partition=CPUQ              # CPU partition
-#SBATCH --account=<YOUR_ACCOUNT>      # TODO: Replace with your account
+#SBATCH --account=share-ie-idi
 #SBATCH --time=02:00:00               # 2 hours
 #SBATCH --nodes=1                     # 1 compute node
 #SBATCH --ntasks-per-node=1           # 1 task per node
@@ -13,7 +13,7 @@
 #SBATCH --mem=64G                     # 64GB memory
 #SBATCH --job-name="irange_cpu_test"
 #SBATCH --output=logs/cpu_%j.log
-#SBATCH --mail-user=<YOUR_EMAIL>      # TODO: Replace with your email
+#SBATCH --mail-user=nordang.vetle@gmail.com
 #SBATCH --mail-type=ALL
 
 # Print job information
@@ -46,19 +46,12 @@ else
     echo "Using existing build directory..."
 fi
 
-# Run your CPU tests/experiments
+# Build GIST indexes
 echo ""
-echo "Running CPU tests..."
+echo "Building GIST indexes..."
 echo "=========================================="
 
-cd build/tests
-for test in buildindex pq_encode pq_compress_only pq_manual_distance; do
-    if [ -f "$test" ]; then
-        echo "Running $test..."
-        ./$test
-        echo "Completed $test"
-    fi
-done
+bash build_gist_indexes.sh
 
 echo "=========================================="
 echo "Job completed on $(date)"

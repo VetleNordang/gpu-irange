@@ -5,7 +5,7 @@
 #
 
 #SBATCH --partition=GPUQ              # GPU partition
-#SBATCH --account=<YOUR_ACCOUNT>      # TODO: Replace with your account (check with: sacctmgr show assoc)
+#SBATCH --account=share-ie-idi
 #SBATCH --time=04:00:00               # 4 hours (adjust as needed)
 #SBATCH --nodes=1                     # 1 compute node
 #SBATCH --ntasks-per-node=1           # 1 task per node
@@ -14,7 +14,7 @@
 #SBATCH --gres=gpu:1                  # 1 GPU (use gpu:a100:1 or gpu:v100:1 for specific types)
 #SBATCH --job-name="irange_gpu_test"
 #SBATCH --output=logs/gpu_%j.log
-#SBATCH --mail-user=<YOUR_EMAIL>      # TODO: Replace with your email
+#SBATCH --mail-user=nordang.vetle@gmail.com
 #SBATCH --mail-type=ALL
 
 # Print job information
@@ -47,25 +47,12 @@ else
     echo "Using existing build directory..."
 fi
 
-# Run your GPU tests/experiments
+# Run GPU searches and save results
 echo ""
-echo "Running GPU tests..."
+echo "Running GPU searches..."
 echo "=========================================="
 
-# Example: Run individual test executables
-# Uncomment and adjust as needed:
-# ./build/tests/search
-# ./build/tests/search_multi
-
-# Or run all tests:
-cd build/tests
-for test in search search_multi; do
-    if [ -f "$test" ]; then
-        echo "Running $test..."
-        ./$test
-        echo "Completed $test"
-    fi
-done
+bash run_all_searches_gpu.sh
 
 echo "=========================================="
 echo "Job completed on $(date)"
