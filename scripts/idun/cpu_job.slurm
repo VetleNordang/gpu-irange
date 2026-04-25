@@ -36,7 +36,7 @@ module load GCCcore/12.2.0
 module load CMake/3.24.3-GCCcore-12.2.0
 
 # Build the project if needed
-if [ ! -d "build" ]; then
+if [ ! -f "build/tests/buildindex" ]; then
     echo "Building project..."
     mkdir -p build
     cd build
@@ -44,7 +44,7 @@ if [ ! -d "build" ]; then
     make -j $SLURM_CPUS_PER_TASK
     cd ..
 else
-    echo "Using existing build directory..."
+    echo "Using existing build..."
 fi
 
 # Build GIST indexes
