@@ -32,8 +32,8 @@ cd "$SLURM_SUBMIT_DIR"
 
 # Load necessary modules
 module purge
-module load GCCcore/12.2.0
-module load CMake/3.24.3-GCCcore-12.2.0
+module load GCCcore/11.3.0
+module load CMake/3.23.1-GCCcore-11.3.0
 module load CUDA/11.8.0
 
 # Build the project if needed
