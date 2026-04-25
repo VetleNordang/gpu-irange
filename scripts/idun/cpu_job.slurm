@@ -34,13 +34,14 @@ cd "$SLURM_SUBMIT_DIR"
 module purge
 module load GCCcore/12.2.0
 module load CMake/3.24.3-GCCcore-12.2.0
+module load CUDA/11.8.0
 
 # Build the project if needed
 if [ ! -f "build/tests/buildindex" ]; then
     echo "Building project..."
     mkdir -p build
     cd build
-    cmake ..
+    cmake .. -DCMAKE_CUDA_ARCHITECTURES="70;80"
     make -j $SLURM_CPUS_PER_TASK
     cd ..
 else
