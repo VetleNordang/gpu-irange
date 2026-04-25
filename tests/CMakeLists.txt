@@ -1,6 +1,24 @@
 find_package(CUDA REQUIRED)
 enable_language(CUDA)
 
+if(ENABLE_FAISS)
+	find_path(FAISS_INCLUDE_DIR faiss/IndexFlat.h)
+	find_library(FAISS_LIBRARY faiss)
+
+add_executable(buildindex buildindex.cpp)
+target_include_directories(buildindex PRIVATE ${FAISS_INCLUDE_DIR})
+target_link_libraries(buildindex ${CUDA_LIBRARIES})
+
+add_executable(search search.cpp)
+target_include_directories(search PRIVATE ${FAISS_INCLUDE_DIR})
+target_link_libraries(search ${CUDA_LIBRARIES})
+
+add_executable(search_multi search_multi.cpp)
+target_include_directories(search_multi PRIVATE ${FAISS_INCLUDE_DIR})
+target_link_libraries(search_multi ${CUDA_LIBRARIES})
+
+else()
+
 add_executable(buildindex buildindex.cpp)
 target_link_libraries(buildindex ${CUDA_LIBRARIES})
 
@@ -10,9 +28,9 @@ target_link_libraries(search ${CUDA_LIBRARIES})
 add_executable(search_multi search_multi.cpp)
 target_link_libraries(search_multi ${CUDA_LIBRARIES})
 
+endif()
+
 if(ENABLE_FAISS)
-	find_path(FAISS_INCLUDE_DIR faiss/IndexFlat.h)
-	find_library(FAISS_LIBRARY faiss)
 	find_package(BLAS REQUIRED)
 	find_package(LAPACK REQUIRED)
 	find_package(OpenMP REQUIRED)
