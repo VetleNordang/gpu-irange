@@ -41,7 +41,9 @@ if [ ! -f "build/tests/buildindex" ]; then
     echo "Building project..."
     mkdir -p build
     cd build
-    cmake .. -DCMAKE_CUDA_ARCHITECTURES="70;80"
+    cmake .. -DCMAKE_CUDA_ARCHITECTURES="70;80" \
+        -DFAISS_INCLUDE_DIR=/cluster/home/vetlean/.conda/envs/irange/include \
+        -DFAISS_LIBRARY=/cluster/home/vetlean/.conda/envs/irange/lib/libfaiss.so
     make -j $SLURM_CPUS_PER_TASK
     cd ..
 else
