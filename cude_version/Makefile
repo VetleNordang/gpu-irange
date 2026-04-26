@@ -1,5 +1,6 @@
 NVCC = nvcc
-ARCH = -arch=sm_60
+GPU_ARCH ?= sm_70
+ARCH = -arch=$(GPU_ARCH)
 FAISS_INCLUDE ?=
 FAISS_LIB_PATH ?=
 INCLUDE = -I../include $(FAISS_INCLUDE)

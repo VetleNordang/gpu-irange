@@ -21,7 +21,8 @@ if [ ! -f "$GPU_EXECUTABLE" ]; then
     echo "Building optimized GPU target..."
     if ! make -C "$SCRIPT_DIR/cude_version" optimized_test \
             FAISS_INCLUDE="${FAISS_INCLUDE:-}" \
-            FAISS_LIB_PATH="${FAISS_LIB_PATH:-}"; then
+            FAISS_LIB_PATH="${FAISS_LIB_PATH:-}" \
+            GPU_ARCH="${GPU_ARCH:-sm_70}"; then
         echo "Error: failed to build optimized GPU target"
         exit 1
     fi

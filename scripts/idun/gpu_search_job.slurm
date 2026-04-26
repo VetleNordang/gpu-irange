@@ -27,6 +27,7 @@ echo "=========================================="
 cd "$SLURM_SUBMIT_DIR"
 
 module purge
+module load GCCcore/11.3.0
 module load CUDA/11.8.0
 
 CONDA_FAISS=/cluster/home/vetlean/.conda/envs/irange
@@ -36,6 +37,11 @@ export LD_LIBRARY_PATH="$CONDA_FAISS/lib:$LD_LIBRARY_PATH"
 
 echo "GPU info:"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+
+# Detect GPU compute capability (e.g. 7.0 -> sm_70)
+CC=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d ' .')
+export GPU_ARCH="sm_${CC}"
+echo "Compute capability: $GPU_ARCH"
 
 if [ ! -f "build/tests/search" ]; then
     echo "ERROR: search binary not found. Run cpu_job.slurm first."
