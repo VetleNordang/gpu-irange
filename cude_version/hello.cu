@@ -508,7 +508,7 @@ int main(int argc, char **argv) {
     std::cout << "Loading queries..." << std::endl;
     storage.LoadQuery(paths["query_vector"]);
     // If it is the first run, Generate shall be called; otherwise, Generate can be skipped
-    // Generate(storage);
+    Generate(storage);
     std::cout << "Loading query ranges..." << std::endl;
     storage.LoadQueryRange(paths["range_saveprefix"]);
     std::cout << "Loading ground truth..." << std::endl;

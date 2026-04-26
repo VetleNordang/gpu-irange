@@ -19,7 +19,9 @@ PLOT_SCRIPT="$SCRIPT_DIR/python/plots/plot_gpu_vs_cpu.py"
 if [ ! -f "$GPU_EXECUTABLE" ]; then
     echo "Optimized GPU executable not found at $GPU_EXECUTABLE"
     echo "Building optimized GPU target..."
-    if ! make -C "$SCRIPT_DIR/cude_version" optimized_test; then
+    if ! make -C "$SCRIPT_DIR/cude_version" optimized_test \
+            FAISS_INCLUDE="${FAISS_INCLUDE:-}" \
+            FAISS_LIB_PATH="${FAISS_LIB_PATH:-}"; then
         echo "Error: failed to build optimized GPU target"
         exit 1
     fi

@@ -1,6 +1,8 @@
 NVCC = nvcc
 ARCH = -arch=sm_60
-INCLUDE = -I../include
+FAISS_INCLUDE ?=
+FAISS_LIB_PATH ?=
+INCLUDE = -I../include $(FAISS_INCLUDE)
 PROJECT_ROOT = ..
 DIST_THREADS_PER_NEIGHBOR ?= 4
 OPT_FLAGS = -O3 --use_fast_math -lineinfo -DDIST_THREADS_PER_NEIGHBOR=$(DIST_THREADS_PER_NEIGHBOR) -Xcompiler "-O3 -march=native -fopenmp -DNDEBUG"
@@ -99,15 +101,15 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 $(TARGET): $(BUILD_DIR) $(SOURCE) $(HEADERS)
-	$(NVCC) $(ARCH) $(INCLUDE) $(FAISS_CFLAGS) -Xcompiler "-DENABLE_FAISS,-fopenmp" -Xcompiler "-lgomp" $(SOURCE) -o $(TARGET) -lgomp -lblas -llapack -lfaiss
+	$(NVCC) $(ARCH) $(INCLUDE) $(FAISS_CFLAGS) -Xcompiler "-DENABLE_FAISS,-fopenmp" -Xcompiler "-lgomp" $(SOURCE) -o $(TARGET) $(FAISS_LIB_PATH) -lgomp -lblas -llapack -lfaiss
 
 $(PQ_TARGET): $(BUILD_DIR) $(PQ_SOURCE) $(HEADERS)
-	$(NVCC) $(ARCH) $(INCLUDE) $(FAISS_CFLAGS) -Xcompiler "-DENABLE_FAISS,-fopenmp" -Xcompiler "-lgomp" $(PQ_SOURCE) -o $(PQ_TARGET) -lgomp -lblas -llapack -lfaiss
+	$(NVCC) $(ARCH) $(INCLUDE) $(FAISS_CFLAGS) -Xcompiler "-DENABLE_FAISS,-fopenmp" -Xcompiler "-lgomp" $(PQ_SOURCE) -o $(PQ_TARGET) $(FAISS_LIB_PATH) -lgomp -lblas -llapack -lfaiss
 
 optimized_test: $(OPT_TARGET)
 
 $(OPT_TARGET): $(BUILD_DIR) $(SOURCE) $(HEADERS)
-	$(NVCC) $(ARCH) $(OPT_FLAGS) $(INCLUDE) $(FAISS_CFLAGS) -Xcompiler "$(FAISS_CFLAGS),-fopenmp,-lgomp" $(SOURCE) -o $(OPT_TARGET) -lgomp -lblas -llapack -lfaiss
+	$(NVCC) $(ARCH) $(OPT_FLAGS) $(INCLUDE) $(FAISS_CFLAGS) -Xcompiler "$(FAISS_CFLAGS),-fopenmp,-lgomp" $(SOURCE) -o $(OPT_TARGET) $(FAISS_LIB_PATH) -lgomp -lblas -llapack -lfaiss
 
 run: $(TARGET)
 	$(TARGET) $(ARGS)

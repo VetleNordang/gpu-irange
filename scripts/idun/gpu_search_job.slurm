@@ -29,6 +29,11 @@ cd "$SLURM_SUBMIT_DIR"
 module purge
 module load CUDA/11.8.0
 
+CONDA_FAISS=/cluster/home/vetlean/.conda/envs/irange
+export FAISS_INCLUDE="-I$CONDA_FAISS/include"
+export FAISS_LIB_PATH="-L$CONDA_FAISS/lib"
+export LD_LIBRARY_PATH="$CONDA_FAISS/lib:$LD_LIBRARY_PATH"
+
 echo "GPU info:"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
