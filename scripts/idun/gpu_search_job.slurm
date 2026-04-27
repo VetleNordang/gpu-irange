@@ -6,7 +6,7 @@
 
 #SBATCH --partition=GPUQ
 #SBATCH --account=share-ie-idi
-#SBATCH --time=04:00:00
+#SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
@@ -34,6 +34,9 @@ CONDA_FAISS=/cluster/home/vetlean/.conda/envs/irange
 export FAISS_INCLUDE="-I$CONDA_FAISS/include"
 export FAISS_LIB_PATH="-L$CONDA_FAISS/lib"
 export LD_LIBRARY_PATH="$CONDA_FAISS/lib:$LD_LIBRARY_PATH"
+
+# Use the conda env's Python so pandas/matplotlib are available for plots
+export PATH="$CONDA_FAISS/bin:$PATH"
 
 echo "GPU info:"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader

@@ -108,15 +108,15 @@ run_gpu_search() {
 # ============================================
 # Video (YouTube RGB) Index
 # ============================================
-run_gpu_search "Video (YouTube RGB)" \
-    "exectable_data/video/results/results_gpu" \
+run_gpu_search "Video 1m (YouTube RGB)" \
+    "exectable_data/video/1m/results/results_gpu" \
     "video" \
-    --data_path exectable_data/video/youtube_rgb_sorted.bin \
-    --query_path exectable_data/video/youtube_rgb_query.bin \
-    --range_saveprefix exectable_data/video/query_ranges/query_ranges \
-    --groundtruth_saveprefix exectable_data/video/ground_truth/ground_truth \
-    --index_file exectable_data/video/youtube_rgb.index \
-    --result_saveprefix exectable_data/video/results/results_gpu
+    --data_path  exectable_data/video/1m/youtube_rgb_1m.bin \
+    --query_path exectable_data/video/1m/youtube_rgb_query.bin \
+    --range_saveprefix       exectable_data/video/1m/query_ranges/query_ranges \
+    --groundtruth_saveprefix exectable_data/video/1m/ground_truth/ground_truth \
+    --index_file             exectable_data/video/1m/youtube_rgb_1m.index \
+    --result_saveprefix      exectable_data/video/1m/results/results_gpu
 
 # ============================================
 # GIST 250k Index

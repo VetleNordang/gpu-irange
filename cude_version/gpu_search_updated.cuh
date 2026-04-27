@@ -239,7 +239,11 @@ __device__ void SelectEdge_gpu(int pid, int ql, int qr, int edge_limit,
         __syncthreads();
         
         if (lane_id == 0) {
-            if (*output_count >= edge_limit || (s_cur_node.lbound >= ql && s_cur_node.rbound <= qr)) {
+            // s_nxt_idx == -1 means we hit a leaf (or no child contains pid) and
+            // cannot descend further — terminate rather than access d_nodes[-1].
+            if (*output_count >= edge_limit
+                    || (s_cur_node.lbound >= ql && s_cur_node.rbound <= qr)
+                    || s_nxt_idx == -1) {
                 s_done = true;
             }
         }
