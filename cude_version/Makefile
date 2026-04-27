@@ -1,5 +1,5 @@
 NVCC = nvcc
-ARCH = -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80
+ARCH = -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80
 FAISS_INCLUDE ?=
 FAISS_LIB_PATH ?=
 INCLUDE = -I../include $(FAISS_INCLUDE)

@@ -175,7 +175,8 @@ __device__ void SelectEdge_gpu(int pid, int ql, int qr, int edge_limit,
     __syncthreads();
     
     __shared__ bool s_done;
-    if (lane_id == 0) s_done = false;
+    __shared__ int s_depth_counter;
+    if (lane_id == 0) { s_done = false; s_depth_counter = 0; }
     __syncthreads();
     while (!s_done) {
         if (lane_id == 0) {
@@ -239,11 +240,13 @@ __device__ void SelectEdge_gpu(int pid, int ql, int qr, int edge_limit,
         __syncthreads();
         
         if (lane_id == 0) {
-            // s_nxt_idx == -1 means we hit a leaf (or no child contains pid) and
-            // cannot descend further — terminate rather than access d_nodes[-1].
+            s_depth_counter++;
+            // Terminate when: enough edges found, node fully within range,
+            // leaf reached (s_nxt_idx==-1), or hard depth limit exceeded.
             if (*output_count >= edge_limit
                     || (s_cur_node.lbound >= ql && s_cur_node.rbound <= qr)
-                    || s_nxt_idx == -1) {
+                    || s_nxt_idx == -1
+                    || s_depth_counter > 64) {
                 s_done = true;
             }
         }
@@ -388,8 +391,8 @@ __global__ void irange_search_kernel(
             } else {
                 HeapNode current = candidate_set.top();
                 hop_count++;
-                if (current.dist > lowerBound) {
-                    s_num_edges[warp_in_blk] = -1;        // stop: below bound
+                if (current.dist > lowerBound || hop_count > 3 * SearchEF + 500) {
+                    s_num_edges[warp_in_blk] = -1;        // stop: below bound or hop limit
                 } else {
                     candidate_set.pop();
                     s_current_id = current.id;
