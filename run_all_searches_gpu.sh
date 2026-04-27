@@ -65,7 +65,7 @@ run_gpu_search() {
     echo "================================================"
     
     # Run with timeout and capture logs for error scanning
-    timeout 600 "$GPU_EXECUTABLE" "${args[@]}" --M $M 2>&1 | tee "$log_file"
+    timeout 3600 "$GPU_EXECUTABLE" "${args[@]}" --M $M 2>&1 | tee "$log_file"
     local cmd_exit=${PIPESTATUS[0]}
 
     local run_failed=0

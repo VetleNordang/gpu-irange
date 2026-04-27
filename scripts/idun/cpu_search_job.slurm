@@ -8,7 +8,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=64
+#SBATCH --cpus-per-task=32
 #SBATCH --mem=64G
 #SBATCH --job-name="irange_cpu_search"
 #SBATCH --output=logs/cpu_search_%j.log
