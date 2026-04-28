@@ -98,7 +98,12 @@ void load_index_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &
     int dimension = index.storage->Dim;
     int data_points = index.max_elements_;
     size_t total_index_memory = (size_t)data_points * index.size_data_per_element_;
-printf("Attempting to allocate %.2f MB for index\n", total_index_memory / (1024.0 * 1024.0));
+
+    size_t freeMem = 0, totalMem = 0;
+    cudaMemGetInfo(&freeMem, &totalMem);
+    printf("GPU memory: %.2f GB free / %.2f GB total\n",
+           freeMem / (1024.0*1024*1024), totalMem / (1024.0*1024*1024));
+    printf("Attempting to allocate %.2f MB for index\n", total_index_memory / (1024.0 * 1024.0));
     
     // Set metadata
     gpu_index.d_dim = dimension;

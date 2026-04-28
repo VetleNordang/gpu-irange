@@ -62,6 +62,7 @@ run_gpu_search() {
     echo "================================================"
     echo "GPU Search: $dataset_name"
     echo "================================================"
+    nvidia-smi --query-gpu=name,memory.free,memory.used,memory.total --format=csv,noheader
     
     # Run with timeout and capture logs for error scanning
     timeout 3600 "$GPU_EXECUTABLE" "${args[@]}" --M $M 2>&1 | tee "$log_file"
