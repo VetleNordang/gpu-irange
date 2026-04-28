@@ -6,13 +6,13 @@
 
 #SBATCH --partition=GPUQ
 #SBATCH --account=share-ie-idi
-#SBATCH --time=12:00:00
+#SBATCH --time=1:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --gres=gpu:1
-#SBATCH --constraint="a100|v100|h100"
+#SBATCH --constraint="a100|v100"
 #SBATCH --exclusive
 #SBATCH --job-name="irange_gpu_search"
 #SBATCH --output=logs/gpu_search_%j.log
@@ -26,10 +26,11 @@ echo "Node:   $(hostname)"
 echo "=========================================="
 
 cd "$SLURM_SUBMIT_DIR"
+mkdir -p logs
 
 module purge
-module load GCCcore/11.3.0
 module load CUDA/11.8.0
+module load Anaconda3   # adjust version if needed: module avail Anaconda
 
 CONDA_FAISS=/cluster/home/vetlean/.conda/envs/irange
 export FAISS_INCLUDE="-I$CONDA_FAISS/include"
@@ -38,6 +39,7 @@ export LD_LIBRARY_PATH="$CONDA_FAISS/lib:$LD_LIBRARY_PATH"
 
 # Use the conda env's Python so pandas/matplotlib are available for plots
 export PATH="$CONDA_FAISS/bin:$PATH"
+export CONDA_PYTHON="$CONDA_FAISS/bin/python3"
 
 echo "GPU info:"
 nvidia-smi --query-gpu=name,memory.free,memory.total --format=csv,noheader
@@ -54,9 +56,16 @@ CC=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d 
 export GPU_ARCH="sm_${CC}"
 echo "Compute capability: $GPU_ARCH"
 
-if [ ! -f "build/tests/search" ]; then
-    echo "ERROR: search binary not found. Run cpu_job.slurm first."
-    exit 1
+GPU_BINARY="cude_version/build/optimized_test"
+if [ ! -f "$GPU_BINARY" ]; then
+    echo "GPU binary not found at $GPU_BINARY — building now..."
+    mkdir -p logs
+    if ! make -C cude_version optimized_test \
+            FAISS_INCLUDE="$FAISS_INCLUDE" \
+            FAISS_LIB_PATH="$FAISS_LIB_PATH"; then
+        echo "ERROR: build failed. Aborting."
+        exit 1
+    fi
 fi
 
 echo ""

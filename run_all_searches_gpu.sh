@@ -95,7 +95,7 @@ run_gpu_search() {
 
     echo "Running plots after: $dataset_name"
     if [ -f "$PLOT_SCRIPT" ]; then
-        if python3 "$PLOT_SCRIPT" --dataset "$plot_dataset_key"; then
+        if "${CONDA_PYTHON:-python3}" "$PLOT_SCRIPT" --dataset "$plot_dataset_key"; then
             echo "✓ Plot generation completed"
         else
             echo "✗ Plot generation failed (continuing to next dataset)"

@@ -523,7 +523,7 @@ int main(int argc, char **argv) {
     iRangeGraph::iRangeGraph_Search<float> index(paths["data_vector"], paths["index"], &storage, M);
     
     // SearchEF values to test (can be adjusted)
-    std::vector<int> SearchEF = {1700, 1400, 1100, 1000, 900, 800, 700, 600, 500, 400, 300, 250, 200, 180, 160, 140, 120, 100, 90, 80, 70, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10};
+    std::vector<int> SearchEF = {10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 80, 90, 100, 120, 140, 160, 180, 200, 250, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1400, 1700};
     
     std::cout << "\n================================================" << std::endl;
     std::cout << "Running GPU search with " << SearchEF.size() << " different SearchEF values" << std::endl;
