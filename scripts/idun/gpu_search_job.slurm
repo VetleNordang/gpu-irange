@@ -13,6 +13,7 @@
 #SBATCH --mem=64G
 #SBATCH --gres=gpu:1
 #SBATCH --constraint="a100|v100|h100"
+#SBATCH --exclusive
 #SBATCH --job-name="irange_gpu_search"
 #SBATCH --output=logs/gpu_search_%j.log
 #SBATCH --mail-user=nordang.vetle@gmail.com
@@ -39,7 +40,14 @@ export LD_LIBRARY_PATH="$CONDA_FAISS/lib:$LD_LIBRARY_PATH"
 export PATH="$CONDA_FAISS/bin:$PATH"
 
 echo "GPU info:"
-nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+nvidia-smi --query-gpu=name,memory.free,memory.total --format=csv,noheader
+
+FREE_MIB=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader | head -1 | tr -d ' MiB')
+if [ "${FREE_MIB:-0}" -lt 10000 ]; then
+    echo "ERROR: GPU has only ${FREE_MIB} MiB free — need at least 10 GB. Aborting."
+    nvidia-smi
+    exit 1
+fi
 
 # Detect GPU compute capability (e.g. 7.0 -> sm_70)
 CC=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d ' .')
