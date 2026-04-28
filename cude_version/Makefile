@@ -5,7 +5,7 @@ FAISS_LIB_PATH ?=
 INCLUDE = -I../include $(FAISS_INCLUDE)
 PROJECT_ROOT = ..
 DIST_THREADS_PER_NEIGHBOR ?= 4
-OPT_FLAGS = -O3 --use_fast_math -lineinfo -DDIST_THREADS_PER_NEIGHBOR=$(DIST_THREADS_PER_NEIGHBOR) -Xcompiler "-O3 -march=native -fopenmp -DNDEBUG"
+OPT_FLAGS = -O3 --use_fast_math -lineinfo -DDIST_THREADS_PER_NEIGHBOR=$(DIST_THREADS_PER_NEIGHBOR) -Xcompiler "-O3 -fopenmp -DNDEBUG"
 BUILD_DIR = build
 TARGET = $(BUILD_DIR)/hello
 OPT_TARGET = $(BUILD_DIR)/optimized_test

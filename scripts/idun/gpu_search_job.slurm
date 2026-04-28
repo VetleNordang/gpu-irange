@@ -30,7 +30,7 @@ mkdir -p logs
 
 module purge
 module load CUDA/11.8.0
-module load Anaconda3   # adjust version if needed: module avail Anaconda
+module load Anaconda3/2024.02-1
 
 CONDA_FAISS=/cluster/home/vetlean/.conda/envs/irange
 export FAISS_INCLUDE="-I$CONDA_FAISS/include"
