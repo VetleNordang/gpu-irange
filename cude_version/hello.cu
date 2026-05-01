@@ -273,9 +273,12 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     iRangeGraph::DataLoader *storage = index.storage;
 
     
-    int limit_tests = 0; // Added for profiler auto-shutdown
+    int limit_tests = 0;
 
-    // Iterate over all suffixes in storage->query_range (same as CPU version)
+    int*   d_entry_ids    = nullptr;
+    float* d_entry_dists  = nullptr;
+    int*   d_entry_counts = nullptr;
+
     size_t suffix_idx = 0;
     for (auto range : storage->query_range) {
         int suffix = range.first;
@@ -292,13 +295,56 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             outfile.flush();
         }
 
+        // Pre-compute entry points on CPU once per suffix (shared across all EF values)
+        {
+            int query_nb = index.storage->query_nb;
+            const int MAX_EP = 100;
+            int*   h_entry_ids    = new int  [query_nb * MAX_EP];
+            float* h_entry_dists  = new float[query_nb * MAX_EP];
+            int*   h_entry_counts = new int  [query_nb];
+
+            unsigned long long ep_seed = std::chrono::system_clock::now().time_since_epoch().count();
+            for (int i = 0; i < query_nb; i++) {
+                int ql = storage->query_range[suffix][i].first;
+                int qr = storage->query_range[suffix][i].second;
+                const float* qvec = storage->query_points[i].data();
+
+                std::vector<iRangeGraph::TreeNode*> nodes = index.tree->range_filter(index.tree->root, ql, qr);
+                unsigned int rng = (unsigned int)(ep_seed + i);
+                int count = 0;
+                for (auto* node : nodes) {
+                    if (count >= MAX_EP) break;
+                    int range_size = node->rbound - node->lbound + 1;
+                    // same xorshift as GPU
+                    rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+                    int pid = node->lbound + (rng % (unsigned int)range_size);
+                    char* ep_data = index.getDataByInternalId(pid);
+                    float dist = index.fstdistfunc_(qvec, ep_data, index.dist_func_param_);
+                    h_entry_ids  [i * MAX_EP + count] = pid;
+                    h_entry_dists[i * MAX_EP + count] = dist;
+                    count++;
+                }
+                h_entry_counts[i] = count;
+            }
+
+            cudaMalloc(&d_entry_ids,    query_nb * MAX_EP * sizeof(int));
+            cudaMalloc(&d_entry_dists,  query_nb * MAX_EP * sizeof(float));
+            cudaMalloc(&d_entry_counts, query_nb * sizeof(int));
+            cudaMemcpy(d_entry_ids,    h_entry_ids,    query_nb * MAX_EP * sizeof(int),   cudaMemcpyHostToDevice);
+            cudaMemcpy(d_entry_dists,  h_entry_dists,  query_nb * MAX_EP * sizeof(float), cudaMemcpyHostToDevice);
+            cudaMemcpy(d_entry_counts, h_entry_counts, query_nb * sizeof(int),            cudaMemcpyHostToDevice);
+            delete[] h_entry_ids;
+            delete[] h_entry_dists;
+            delete[] h_entry_counts;
+        }
+
         for (int ef : SearchEF) {
             limit_tests++;
             if (limit_tests > 11) {
                 cudaProfilerStop();
             }
 
-           
+
             int query_nb = index.storage->query_nb;
             int max_elements = index.max_elements_;
             int dim = index.storage->Dim;
@@ -352,7 +398,8 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             unsigned long long kernel_seed = std::chrono::system_clock::now().time_since_epoch().count();
             irange_search_kernel<<<num_blocks, threads_per_block>>>(
                 gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx, d_hops, d_dist_comps,
-                index.size_links_per_layer_, kernel_seed
+                index.size_links_per_layer_, kernel_seed,
+                d_entry_ids, d_entry_dists, d_entry_counts
             );
             
             cudaEventRecord(stop);
@@ -450,8 +497,15 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             outfile.close();
             printf("✓ Saved results for suffix %d to %s\n", suffix, savepath.c_str());
         }
-        suffix_idx++;  // Increment for next suffix
 
+        cudaFree(d_entry_ids);
+        cudaFree(d_entry_dists);
+        cudaFree(d_entry_counts);
+        d_entry_ids = nullptr;
+        d_entry_dists = nullptr;
+        d_entry_counts = nullptr;
+
+        suffix_idx++;
     }
 
 
@@ -513,7 +567,7 @@ int main(int argc, char **argv) {
     std::cout << "Loading queries..." << std::endl;
     storage.LoadQuery(paths["query_vector"]);
     // If it is the first run, Generate shall be called; otherwise, Generate can be skipped
-    Generate(storage);
+    // Generate(storage);
     std::cout << "Loading query ranges..." << std::endl;
     storage.LoadQueryRange(paths["range_saveprefix"]);
     std::cout << "Loading ground truth..." << std::endl;
@@ -523,7 +577,7 @@ int main(int argc, char **argv) {
     iRangeGraph::iRangeGraph_Search<float> index(paths["data_vector"], paths["index"], &storage, M);
     
     // SearchEF values to test (can be adjusted)
-    std::vector<int> SearchEF = {10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 80, 90, 100, 120, 140, 160, 180, 200, 250, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1400, 1700};
+    std::vector<int> SearchEF = {1700, 1400, 1100, 1000, 900, 800, 700, 600, 500, 400, 300, 250, 200, 180, 160, 140, 120, 100, 90, 80, 70, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10};
     
     std::cout << "\n================================================" << std::endl;
     std::cout << "Running GPU search with " << SearchEF.size() << " different SearchEF values" << std::endl;

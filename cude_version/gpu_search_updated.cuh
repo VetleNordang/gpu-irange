@@ -178,6 +178,7 @@ __device__ void SelectEdge_gpu(int pid, int ql, int qr, int edge_limit,
     __shared__ int s_depth_counter;
     if (lane_id == 0) { s_done = false; s_depth_counter = 0; }
     __syncthreads();
+    
     while (!s_done) {
         if (lane_id == 0) {
             s_cur_idx = s_nxt_idx;
@@ -292,17 +293,19 @@ __global__ void irange_search_kernel(
     int SearchEF,
     int query_K,
     int dim,
-    int suffix_id,           // Which range to use
-    int* d_hops,             // Output: hops per query
-    int* d_dist_comps,       // Output: distance computations per query
+    int suffix_id,
+    int* d_hops,
+    int* d_dist_comps,
     size_t size_links_per_layer,
-    unsigned long long seed
+    unsigned long long seed,
+    int*   d_entry_ids,      // [query_nb * 100] pre-computed on CPU
+    float* d_entry_dists,    // [query_nb * 100] pre-computed on CPU
+    int*   d_entry_counts    // [query_nb]
 ) {
     // --- Thread identity ---
-    const int lane_id           = threadIdx.x % THREADS_PER_QUERY;
-    const int warp_in_blk       = threadIdx.x / THREADS_PER_QUERY;  // always 0 (1 query/block)
-    const int queries_per_block = blockDim.x  / THREADS_PER_QUERY;
-    const int query_id          = blockIdx.x  * queries_per_block + warp_in_blk;
+    const int lane_id     = threadIdx.x;              // 0..511 within block
+    const int query_id    = blockIdx.x;
+
 
     if (query_id >= query_nb) return;
 
@@ -310,9 +313,9 @@ __global__ void irange_search_kernel(
     // s_edges    : up to NEIGHBORS_PER_BATCH (32) neighbour IDs from SelectEdge
     // s_dists    : final distances written by lane-in-group==0 after reduction
     // s_num_edges: set by lane 0; -1 signals loop termination
-    __shared__ int   s_edges    [MAX_QUERIES_PER_BLOCK][32];
-    __shared__ float s_dists    [MAX_QUERIES_PER_BLOCK][32];
-    __shared__ int   s_num_edges[MAX_QUERIES_PER_BLOCK];
+    __shared__ int   s_edges [32];
+    __shared__ float s_dists [32];
+    __shared__ int   s_num_edges;
 
     // --- Per-query values readable by all lanes ---
     float* query_vector = gpu_index.d_query_vectors + (long long)query_id * dim;
@@ -331,32 +334,17 @@ __global__ void irange_search_kernel(
     int      dist_comp_count = 0;
 
     // =========================================================
-    // Phase 1 - Entry-point seeding (lane 0 only)
+    // Phase 1 - Entry-point seeding from CPU pre-computed list (lane 0 only)
     // =========================================================
     if (lane_id == 0) {
-        candidate_set.init(&s_candidate_buffer[warp_in_blk * MAX_SEARCH_EF], MAX_SEARCH_EF);
-        top_candidates.init(&s_top_candidate_buffer[warp_in_blk * MAX_SEARCH_EF], SearchEF + 1);
+        candidate_set.init(&s_candidate_buffer[0], MAX_SEARCH_EF);
+        top_candidates.init(&s_top_candidate_buffer[0], SearchEF + 1);
 
-        unsigned int rng_state = (unsigned int)(seed + query_id);
-
-        int filtered_indices[100];
-        int num_filtered = range_filter_gpu(gpu_index.d_segment_tree.d_nodes, 0, ql, qr,
-                                            filtered_indices, 100);
-
-        for (int f = 0; f < num_filtered; f++) {
-            GPUNode seg_node  = gpu_index.d_segment_tree.d_nodes[filtered_indices[f]];
-            int range_size    = seg_node.rbound - seg_node.lbound + 1;
-            int entry_point   = seg_node.lbound + (xorshift32(&rng_state) % range_size);
-
-            if (isVisited(visited, query_id, entry_point)) continue;
-            markVisited(visited, query_id, entry_point);
-
-            float entry_dist = L2Distance(
-                query_vector,
-                getVectorByID(entry_point, gpu_index.d_data_memory,
-                              gpu_index.d_size_data_per_element, gpu_index.d_offsetData),
-                dim);
-            dist_comp_count++;
+        int num_entries = d_entry_counts[query_id];
+        int base        = query_id * 100;
+        for (int f = 0; f < num_entries; f++) {
+            float entry_dist  = d_entry_dists[base + f];
+            int   entry_point = d_entry_ids  [base + f];
 
             candidate_set.push(entry_dist, entry_point);
             top_candidates.push(entry_dist, entry_point);
@@ -364,9 +352,7 @@ __global__ void irange_search_kernel(
         }
 
         lowerBound = (top_candidates.size > 0) ? top_candidates.top().dist : FLT_MAX;
-
-        // Pre-clear so the first __syncthreads is well-defined
-        s_num_edges[warp_in_blk] = 0;
+        s_num_edges = 0;
     }
     __syncthreads();
 
@@ -388,16 +374,16 @@ __global__ void irange_search_kernel(
         // --- (a) Lane 0: advance one greedy step ---
         if (lane_id == 0) {
             if (candidate_set.empty()) {
-                s_num_edges[warp_in_blk] = -1;            // stop: exhausted
+                s_num_edges = -1;            // stop: exhausted
             } else {
                 HeapNode current = candidate_set.top();
                 hop_count++;
                 if (current.dist > lowerBound || hop_count > 3 * SearchEF + 500) {
-                    s_num_edges[warp_in_blk] = -1;        // stop: below bound or hop limit
+                    s_num_edges  = -1;        // stop: below bound or hop limit
                 } else {
                     candidate_set.pop();
                     s_current_id = current.id;
-                    s_num_edges[warp_in_blk] = 0; // ready to extract
+                    s_num_edges = 0; // ready to extract
                 }
             }
         }
@@ -405,21 +391,21 @@ __global__ void irange_search_kernel(
         // --- (b) Sync: all 128 threads can now read s_num_edges / s_edges ---
         __syncthreads();
         
-        if (s_num_edges[warp_in_blk] != -1) {
+        if (s_num_edges != -1) {
             SelectEdge_gpu(s_current_id, ql, qr, 32,
                            gpu_index.d_segment_tree.d_nodes, 0,
                            gpu_index.d_data_memory,
                            gpu_index.d_size_data_per_element,
                            size_links_per_layer,
                            visited, query_id,
-                           s_edges[warp_in_blk], &s_num_edges[warp_in_blk], lane_id);
+                           s_edges, &s_num_edges, lane_id);
         }
         __syncthreads();
 
         // --- (c) Termination check (all lanes) ---
-        if (s_num_edges[warp_in_blk] == -1) break;
+        if (s_num_edges == -1) break;
 
-        const int num_edges = s_num_edges[warp_in_blk];
+        const int num_edges = s_num_edges;
 
         // --- (d/e/f) Process edges in batches so mode=1 and mode=4 both work ---
         for (int edge_base = 0; edge_base < num_edges; edge_base += NEIGHBORS_PER_BATCH) {
@@ -434,7 +420,7 @@ __global__ void irange_search_kernel(
 
             if (neighbor_slot < edges_in_batch) {
                 int neighbor_idx = edge_base + neighbor_slot;
-                neighbor_id      = s_edges[warp_in_blk][neighbor_idx];
+                neighbor_id      = s_edges[neighbor_idx];
 
                 partial = L2DistancePartial(
                     query_vector,
@@ -450,7 +436,7 @@ __global__ void irange_search_kernel(
             }
 
             if (neighbor_slot < edges_in_batch && lane_in_group == 0) {
-                s_dists[warp_in_blk][neighbor_slot] = partial;
+                s_dists[neighbor_slot] = partial;
             }
 
             // Sync so lane 0 sees all distance results for this batch
@@ -458,8 +444,8 @@ __global__ void irange_search_kernel(
 
             if (lane_id == 0) {
                 for (int i = 0; i < edges_in_batch; i++) {
-                    int   neighbor_id   = s_edges[warp_in_blk][edge_base + i];
-                    float neighbor_dist = s_dists[warp_in_blk][i];
+                    int   neighbor_id   = s_edges[edge_base + i];
+                    float neighbor_dist = s_dists[i];
 
                     markVisited(visited, query_id, neighbor_id);
                     dist_comp_count++;
