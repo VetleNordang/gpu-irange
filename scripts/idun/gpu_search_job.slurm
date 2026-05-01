@@ -12,7 +12,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --gres=gpu:1
-#SBATCH --constraint="a100|v100"
+#SBATCH --constraint="gpu32g|gpu40g|gpu80g"
 #SBATCH --exclusive
 #SBATCH --job-name="irange_gpu_search"
 #SBATCH --output=logs/gpu_search_%j.log
