@@ -55,11 +55,12 @@ endif
 # Normal distance computation args (500k dataset)
 ARGS = --data_path $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_base_500k.bin \
 		--query_path $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_query_500k.bin \
-                --range_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/query_ranges/query_ranges_500k_ \
-                --groundtruth_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/groundtruth/groundtruth_500k_ \
-                --index_file $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_500k.index \
-                --result_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/results/results_500k_ \
-                --M 32
+		--range_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/query_ranges/query_ranges_500k_ \
+		--groundtruth_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/groundtruth/groundtruth_500k_ \
+		--index_file $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_500k.index \
+		--result_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/results/results_500k_ \
+		--M 32
+
 # PQ compression mode args (250k dataset - working configuration)
 # PQ_ARGS = --data_path_comp $(PROJECT_ROOT)/exectable_data/gist1m/250k/gist_base_250k.bin \
 # 		--query_path $(PROJECT_ROOT)/exectable_data/gist1m/250k/gist_query_250k.bin \
@@ -75,9 +76,12 @@ ARGS = --data_path $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_base_500k.bin
 PQ_ARGS = --data_path_comp $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_base_500k.bin \
 		--query_path $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_query_500k.bin \
 		--index_path $(PROJECT_ROOT)/exectable_data/gist1m/500k/gist_500k.index \
-                --result_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/results/pq/results_pq_ \
-                --range_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/query_ranges/query_ranges_500k_ \
-                --groundtruth_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/groundtruth/groundtruth_500k_ \
+		--result_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/results/pq/results_pq_ \
+		--range_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/query_ranges/query_ranges_500k_ \
+		--groundtruth_saveprefix $(PROJECT_ROOT)/exectable_data/gist1m/500k/groundtruth/groundtruth_500k_ \
+		--pq_model_out $(PROJECT_ROOT)/exectable_data/gist1m/500k/pq/gist_500k_pq_m320.faiss \
+		--pq_codes_out $(PROJECT_ROOT)/exectable_data/gist1m/500k/pq/gist_500k_codes_m320.bin \
+		--M_compression_spaces 320 \
 		--graph_M 32
 
 # ARGS = --data_path $(PROJECT_ROOT)/exectable_data/audi/yt_aud_sorted_vec_by_attr.bin \

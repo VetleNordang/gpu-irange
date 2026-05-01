@@ -431,10 +431,10 @@ __global__ void irange_search_kernel(
 
             float partial = 0.0f;
             int neighbor_id = -1;
-            
+
             if (neighbor_slot < edges_in_batch) {
                 int neighbor_idx = edge_base + neighbor_slot;
-                neighbor_id  = s_edges[warp_in_blk][neighbor_idx];
+                neighbor_id      = s_edges[warp_in_blk][neighbor_idx];
 
                 partial = L2DistancePartial(
                     query_vector,
