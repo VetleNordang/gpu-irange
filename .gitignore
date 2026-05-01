@@ -21,3 +21,6 @@ cude_version/my_kernel*
 OPTIMIZATION*
 my_kernel*
 PROSPECTIVE_OPTIMIZATIONS*
+
+.venv*
+

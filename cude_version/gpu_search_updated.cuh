@@ -183,7 +183,7 @@ __device__ void SelectEdge_gpu(int pid, int ql, int qr, int edge_limit,
             s_cur_idx = s_nxt_idx;
             s_cur_node = d_nodes[s_cur_idx];
             
-            bool contain = false;
+            bool contain = false; int loop_count=0;
             do {
                 contain = false;
                 s_nxt_idx = -1;
@@ -209,7 +209,7 @@ __device__ void SelectEdge_gpu(int pid, int ql, int qr, int edge_limit,
                         if (cur_overlap == nxt_overlap) {
                             s_cur_idx = s_nxt_idx;
                             s_cur_node = nxt_node;
-                            contain = true;
+                            contain = true; loop_count++; if(query_id==0 && loop_count>100) { printf("Stuck in SelectEdge_gpu!\n"); break; }
                         }
                     }
                 }
@@ -247,7 +247,8 @@ __device__ void SelectEdge_gpu(int pid, int ql, int qr, int edge_limit,
                     || (s_cur_node.lbound >= ql && s_cur_node.rbound <= qr)
                     || s_nxt_idx == -1
                     || s_depth_counter > 64) {
-                s_done = true;
+                
+                s_done = true; if(query_id==0 && s_depth_counter > 64) printf("Depth limit reached node=%d\n", s_cur_idx);
             }
         }
         __syncthreads();
@@ -428,25 +429,28 @@ __global__ void irange_search_kernel(
             const int neighbor_slot   = lane_id / DIST_THREADS_PER_NEIGHBOR;
             const int lane_in_group   = lane_id % DIST_THREADS_PER_NEIGHBOR;
 
+            float partial = 0.0f;
+            int neighbor_id = -1;
+            
             if (neighbor_slot < edges_in_batch) {
                 int neighbor_idx = edge_base + neighbor_slot;
-                int neighbor_id  = s_edges[warp_in_blk][neighbor_idx];
+                neighbor_id  = s_edges[warp_in_blk][neighbor_idx];
 
-                float partial = L2DistancePartial(
+                partial = L2DistancePartial(
                     query_vector,
                     getVectorByID(neighbor_id, gpu_index.d_data_memory,
                                   gpu_index.d_size_data_per_element, gpu_index.d_offsetData),
                     dim,
                     lane_in_group,
                     DIST_THREADS_PER_NEIGHBOR);
+            }
 
-                for (int offset = DIST_THREADS_PER_NEIGHBOR / 2; offset > 0; offset >>= 1) {
-                    partial += __shfl_down_sync(0xffffffff, partial, offset, DIST_THREADS_PER_NEIGHBOR);
-                }
+            for (int offset = DIST_THREADS_PER_NEIGHBOR / 2; offset > 0; offset >>= 1) {
+                partial += __shfl_down_sync(0xffffffff, partial, offset, DIST_THREADS_PER_NEIGHBOR);
+            }
 
-                if (lane_in_group == 0) {
-                    s_dists[warp_in_blk][neighbor_slot] = partial;
-                }
+            if (neighbor_slot < edges_in_batch && lane_in_group == 0) {
+                s_dists[warp_in_blk][neighbor_slot] = partial;
             }
 
             // Sync so lane 0 sees all distance results for this batch

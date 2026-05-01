@@ -29,7 +29,8 @@ cd "$SLURM_SUBMIT_DIR"
 mkdir -p logs
 
 module purge
-module load CUDA/11.8.0
+module load GCCcore/11.3.0
+module load CUDA/12.1.1
 module load Anaconda3/2024.02-1
 
 CONDA_FAISS=/cluster/home/vetlean/.conda/envs/irange
