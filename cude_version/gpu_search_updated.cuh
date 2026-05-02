@@ -184,7 +184,7 @@ __device__ void SelectEdge_gpu(int pid, int ql, int qr, int edge_limit,
             s_cur_idx = s_nxt_idx;
             s_cur_node = d_nodes[s_cur_idx];
             
-            bool contain = false; int loop_count=0;
+            bool contain = false;
             do {
                 contain = false;
                 s_nxt_idx = -1;
@@ -201,16 +201,16 @@ __device__ void SelectEdge_gpu(int pid, int ql, int qr, int edge_limit,
                             s_nxt_idx = s_cur_node.right_child_index;
                         }
                     }
-                    
+
                     if (s_nxt_idx != -1) {
                         GPUNode nxt_node = d_nodes[s_nxt_idx];
                         int cur_overlap = GetOverLap(s_cur_node.lbound, s_cur_node.rbound, ql, qr);
                         int nxt_overlap = GetOverLap(nxt_node.lbound, nxt_node.rbound, ql, qr);
-                        
+
                         if (cur_overlap == nxt_overlap) {
                             s_cur_idx = s_nxt_idx;
                             s_cur_node = nxt_node;
-                            contain = true; loop_count++; if(query_id==0 && loop_count>100) { printf("Stuck in SelectEdge_gpu!\n"); break; }
+                            contain = true;
                         }
                     }
                 }
@@ -249,7 +249,7 @@ __device__ void SelectEdge_gpu(int pid, int ql, int qr, int edge_limit,
                     || s_nxt_idx == -1
                     || s_depth_counter > 64) {
                 
-                s_done = true; if(query_id==0 && s_depth_counter > 64) printf("Depth limit reached node=%d\n", s_cur_idx);
+                s_done = true;
             }
         }
         __syncthreads();
@@ -415,28 +415,36 @@ __global__ void irange_search_kernel(
             const int neighbor_slot   = lane_id / DIST_THREADS_PER_NEIGHBOR;
             const int lane_in_group   = lane_id % DIST_THREADS_PER_NEIGHBOR;
 
-            float partial = 0.0f;
-            int neighbor_id = -1;
+            // Build a mask covering only threads that have a real neighbor in this batch.
+            // Each warp handles (32 / DIST_THREADS_PER_NEIGHBOR) neighbors.
+            // Threads beyond that count are genuinely idle and must not participate in the shuffle.
+            const int neighbors_per_warp  = 32 / DIST_THREADS_PER_NEIGHBOR;
+            const int warp_id_in_query    = lane_id / 32;
+            const int remaining           = edges_in_batch - warp_id_in_query * neighbors_per_warp;
+            const unsigned int active_mask =
+                (remaining <= 0)                  ? 0u :
+                (remaining >= neighbors_per_warp) ? 0xffffffffu :
+                                                    (1u << (remaining * DIST_THREADS_PER_NEIGHBOR)) - 1u;
 
             if (neighbor_slot < edges_in_batch) {
                 int neighbor_idx = edge_base + neighbor_slot;
-                neighbor_id      = s_edges[neighbor_idx];
+                int neighbor_id  = s_edges[neighbor_idx];
 
-                partial = L2DistancePartial(
+                float partial = L2DistancePartial(
                     query_vector,
                     getVectorByID(neighbor_id, gpu_index.d_data_memory,
                                   gpu_index.d_size_data_per_element, gpu_index.d_offsetData),
                     dim,
                     lane_in_group,
                     DIST_THREADS_PER_NEIGHBOR);
-            }
 
-            for (int offset = DIST_THREADS_PER_NEIGHBOR / 2; offset > 0; offset >>= 1) {
-                partial += __shfl_down_sync(0xffffffff, partial, offset, DIST_THREADS_PER_NEIGHBOR);
-            }
+                for (int offset = DIST_THREADS_PER_NEIGHBOR / 2; offset > 0; offset >>= 1) {
+                    partial += __shfl_down_sync(active_mask, partial, offset, DIST_THREADS_PER_NEIGHBOR);
+                }
 
-            if (neighbor_slot < edges_in_batch && lane_in_group == 0) {
-                s_dists[neighbor_slot] = partial;
+                if (lane_in_group == 0) {
+                    s_dists[neighbor_slot] = partial;
+                }
             }
 
             // Sync so lane 0 sees all distance results for this batch
