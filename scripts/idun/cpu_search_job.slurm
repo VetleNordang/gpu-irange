@@ -27,13 +27,25 @@ mkdir -p logs
 
 module purge
 module load GCCcore/11.3.0
-module load CUDA/11.8.0
+module load CUDA/12.1.1
 
+CONDA_FAISS=/cluster/home/vetlean/.conda/envs/irange
+export LD_LIBRARY_PATH="$CONDA_FAISS/lib:$LD_LIBRARY_PATH"
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 if [ ! -f "build/tests/search" ]; then
-    echo "ERROR: search binary not found. Run cpu_job.slurm first."
-    exit 1
+    echo "search binary not found — building with cmake..."
+    mkdir -p build
+    cd build
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DFAISS_INCLUDE_DIR="$CONDA_FAISS/include" \
+        -DFAISS_LIBRARY="$CONDA_FAISS/lib/libfaiss.so" \
+        || { echo "ERROR: cmake failed"; exit 1; }
+    make -j"$SLURM_CPUS_PER_TASK" search \
+        || { echo "ERROR: make failed"; exit 1; }
+    cd ..
+    echo "Build complete."
 fi
 
 bash run_all_searches.sh
