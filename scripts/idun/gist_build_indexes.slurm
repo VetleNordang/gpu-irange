@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# IDUN CPU Search Job: Run iRangeGraph search on all GIST indexes
+# IDUN Index Build Job: Build HNSW indexes for all GIST1M sizes
 #
 
 #SBATCH --partition=CPUQ
@@ -10,13 +10,13 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=64G
-#SBATCH --job-name="irange_cpu_search"
-#SBATCH --output=logs/cpu_search_%j.log
+#SBATCH --job-name="gist_build_indexes"
+#SBATCH --output=logs/gist_build_%j.log
 #SBATCH --mail-user=nordang.vetle@gmail.com
 #SBATCH --mail-type=END,FAIL
 
 echo "=========================================="
-echo "CPU Search started: $(date)"
+echo "GIST Index Build started: $(date)"
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node:   $(hostname)"
 echo "Cores:  $SLURM_CPUS_PER_TASK"
@@ -27,17 +27,17 @@ mkdir -p logs
 
 module purge
 module load GCCcore/11.3.0
-module load CUDA/11.8.0
+module load CUDA/12.1.1
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-if [ ! -f "build/tests/search" ]; then
-    echo "ERROR: search binary not found. Run cpu_job.slurm first."
-    exit 1
+if [ ! -f "build/tests/buildindex" ]; then
+    echo "buildindex binary not found — building..."
+    make -C . buildindex || { echo "ERROR: build failed"; exit 1; }
 fi
 
-bash run_all_searches.sh
+bash build_gist_indexes.sh
 
 echo "=========================================="
-echo "CPU Search completed: $(date)"
+echo "GIST Index Build completed: $(date)"
 echo "=========================================="

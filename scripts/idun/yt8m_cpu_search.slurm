@@ -30,6 +30,7 @@ echo "Cores:   $SLURM_CPUS_PER_TASK"
 echo "=========================================="
 
 cd "$SLURM_SUBMIT_DIR"
+mkdir -p logs
 
 module purge
 module load GCCcore/11.3.0
