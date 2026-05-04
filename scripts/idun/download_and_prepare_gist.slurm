@@ -63,20 +63,31 @@ ls -lh "$GIST_RAW_DIR"
 echo ""
 echo "--- Step 2: Converting to iRangeGraph binary format ---"
 
-module purge
-module load Python/3.10.8-GCCcore-12.2.0
+ALL_BINS_EXIST=1
+for size in 250k 500k 750k 1000k; do
+    if [ ! -f "$REPO_DIR/exectable_data/gist1m/$size/gist_base_${size}.bin" ]; then
+        ALL_BINS_EXIST=0; break
+    fi
+done
 
-python3 -c "import numpy" 2>/dev/null || pip install --user numpy
+if [ "$ALL_BINS_EXIST" -eq 1 ]; then
+    echo "All .bin files already present — skipping conversion."
+else
+    module purge
+    module load Python/3.10.8-GCCcore-12.2.0
 
-python3 "$REPO_DIR/python/gist/convert_gist_to_irangegraph.py" \
-    --base_fvecs  "$GIST_RAW_DIR/gist_base.fvecs" \
-    --query_fvecs "$GIST_RAW_DIR/gist_query.fvecs" \
-    --out_root    "$REPO_DIR/exectable_data/gist1m" \
-    --sizes       250000,500000,750000,1000000
+    python3 -c "import numpy" 2>/dev/null || pip install --user numpy
 
-if [ $? -ne 0 ]; then
-    echo "ERROR: Conversion script failed."
-    exit 1
+    python3 "$REPO_DIR/python/gist/convert_gist_to_irangegraph.py" \
+        --base_fvecs  "$GIST_RAW_DIR/gist_base.fvecs" \
+        --query_fvecs "$GIST_RAW_DIR/gist_query.fvecs" \
+        --out_root    "$REPO_DIR/exectable_data/gist1m" \
+        --sizes       250000,500000,750000,1000000
+
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Conversion script failed."
+        exit 1
+    fi
 fi
 
 # -------------------------------------------------------
