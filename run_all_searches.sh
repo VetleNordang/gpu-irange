@@ -87,29 +87,37 @@ fi
 
 echo ""
 echo "================================================"
-echo "Searching Video (YouTube RGB) Index"
+echo "Searching Video 1m (YouTube RGB) Index"
 echo "================================================"
+if [ ! -f "exectable_data/video/1m/youtube_rgb_1m.index" ]; then
+    echo "SKIP: index not found at exectable_data/video/1m/youtube_rgb_1m.index"
+else
 $SEARCH_EXECUTABLE \
-    --data_path exectable_data/video/youtube_rgb_sorted.bin \
-    --query_path exectable_data/video/youtube_rgb_query.bin \
-    --range_saveprefix exectable_data/video/query_ranges/query_ranges \
-    --groundtruth_saveprefix exectable_data/video/ground_truth/ground_truth \
-    --index_file exectable_data/video/youtube_rgb.index \
-    --result_saveprefix exectable_data/video/results/results \
+    --data_path exectable_data/video/1m/youtube_rgb_1m.bin \
+    --query_path exectable_data/video/1m/youtube_rgb_query.bin \
+    --range_saveprefix exectable_data/video/1m/query_ranges/qr \
+    --groundtruth_saveprefix exectable_data/video/1m/groundtruth/gt \
+    --index_file exectable_data/video/1m/youtube_rgb_1m.index \
+    --result_saveprefix exectable_data/video/1m/results/results \
     --M $M
+fi
 
 echo ""
 echo "================================================"
-echo "Searching Audi Index"
+echo "Searching Audi 1m Index"
 echo "================================================"
+if [ ! -f "exectable_data/audi/1m/yt_aud_1m.index" ]; then
+    echo "SKIP: index not found at exectable_data/audi/1m/yt_aud_1m.index"
+else
 $SEARCH_EXECUTABLE \
-    --data_path exectable_data/audi/yt_aud_sorted_vec_by_attr.bin \
-    --query_path exectable_data/audi/yt_aud_ranged_queries.bin \
-    --range_saveprefix exectable_data/audi/query_ranges/query_ranges \
-    --groundtruth_saveprefix exectable_data/audi/ground_truth/ground_truth \
-    --index_file exectable_data/audi/yt_aud_irangegraph_M32.bin \
-    --result_saveprefix exectable_data/audi/results/results \
+    --data_path exectable_data/audi/1m/yt_aud_1m.bin \
+    --query_path exectable_data/audi/1m/yt_aud_query.bin \
+    --range_saveprefix exectable_data/audi/1m/query_ranges/qr \
+    --groundtruth_saveprefix exectable_data/audi/1m/groundtruth/gt \
+    --index_file exectable_data/audi/1m/yt_aud_1m.index \
+    --result_saveprefix exectable_data/audi/1m/results/res \
     --M $M
+fi
 
 echo ""
 echo "================================================"

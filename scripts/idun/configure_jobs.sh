@@ -3,14 +3,17 @@
 # Quick script to configure IDUN job scripts with your account info
 #
 # Usage: ./configure_jobs.sh <account> <email>
-# Example: ./configure_jobs.sh my-dep name@ntnu.no
+# Example: ./configure_jobs.sh share-ie-idi name@ntnu.no
+#
+# To find your account, run on IDUN:
+#   sacctmgr show assoc format=Account%15,User,QOS | grep -e QOS -e $USER
 #
 
 if [ $# -ne 2 ]; then
     echo "Usage: $0 <account> <email>"
     echo ""
     echo "Example:"
-    echo "  $0 my-dep name@ntnu.no"
+    echo "  $0 share-ie-idi name@ntnu.no"
     echo ""
     echo "To find your account, run on IDUN:"
     echo "  sacctmgr show assoc format=Account%15,User,QOS | grep -e QOS -e \$USER"
@@ -23,7 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "Configuring IDUN job scripts..."
 echo "Account: $ACCOUNT"
-echo "Email: $EMAIL"
+echo "Email:   $EMAIL"
 echo ""
 
 # Configure all .slurm files
@@ -40,7 +43,8 @@ echo ""
 echo "✓ Configuration complete!"
 echo ""
 echo "Next steps:"
-echo "1. Upload your project to IDUN: rsync -avz --delete ./ username@idun-login1.hpc.ntnu.no:~/irange/"
-echo "2. SSH into IDUN: ssh username@idun-login1.hpc.ntnu.no"
-echo "3. Submit a job: cd ~/irange && sbatch scripts/idun/quick_test.slurm"
-echo "4. Monitor: squeue -u \$USER"
+echo "1. Upload your project to IDUN: rsync -avz --delete ./ vetlean@idun-login1.hpc.ntnu.no:~/gpu-irange/"
+echo "2. SSH into IDUN: ssh vetlean@idun-login1.hpc.ntnu.no"
+echo "3. Submit the GIST pipeline: cd ~/gpu-irange && bash scripts/idun/submit_gist_pipeline.sh"
+echo "4. Submit the YT8M pipeline: cd ~/gpu-irange && bash scripts/idun/submit_yt8m_pipeline.sh"
+echo "5. Monitor: squeue -u \$USER"

@@ -23,4 +23,6 @@ my_kernel*
 PROSPECTIVE_OPTIMIZATIONS*
 
 .venv*
+.claude
+CLAUDE.md
 

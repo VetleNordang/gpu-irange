@@ -114,8 +114,8 @@ run_gpu_search "Video 1m (YouTube RGB)" \
     "video" \
     --data_path  exectable_data/video/1m/youtube_rgb_1m.bin \
     --query_path exectable_data/video/1m/youtube_rgb_query.bin \
-    --range_saveprefix       exectable_data/video/1m/query_ranges/query_ranges \
-    --groundtruth_saveprefix exectable_data/video/1m/ground_truth/ground_truth \
+    --range_saveprefix       exectable_data/video/1m/query_ranges/qr \
+    --groundtruth_saveprefix exectable_data/video/1m/groundtruth/gt \
     --index_file             exectable_data/video/1m/youtube_rgb_1m.index \
     --result_saveprefix      exectable_data/video/1m/results/results_gpu
 
@@ -177,21 +177,20 @@ run_gpu_search "GIST 1000k" \
 # ============================================
 # Audi Index  (skip if data not present)
 # ============================================
-if [ -f "exectable_data/audi/yt_aud_sorted_vec_by_attr.bin" ] && \
-   [ -f "exectable_data/audi/yt_aud_ranged_queries.bin" ]; then
-    run_gpu_search "Audi" \
-        "exectable_data/audi/results/results_gpu" \
+if [ -f "exectable_data/audi/1m/yt_aud_1m.index" ]; then
+    run_gpu_search "Audi 1m" \
+        "exectable_data/audi/1m/results/results_gpu" \
         "audi" \
-        --data_path exectable_data/audi/yt_aud_sorted_vec_by_attr.bin \
-        --query_path exectable_data/audi/yt_aud_ranged_queries.bin \
-        --range_saveprefix exectable_data/audi/query_ranges/query_ranges \
-        --groundtruth_saveprefix exectable_data/audi/ground_truth/ground_truth \
-        --index_file exectable_data/audi/yt_aud_irangegraph_M32.bin \
-        --result_saveprefix exectable_data/audi/results/results_gpu
+        --data_path exectable_data/audi/1m/yt_aud_1m.bin \
+        --query_path exectable_data/audi/1m/yt_aud_query.bin \
+        --range_saveprefix exectable_data/audi/1m/query_ranges/qr \
+        --groundtruth_saveprefix exectable_data/audi/1m/groundtruth/gt \
+        --index_file exectable_data/audi/1m/yt_aud_1m.index \
+        --result_saveprefix exectable_data/audi/1m/results/results_gpu
 else
     echo ""
     echo "================================================"
-    echo "SKIP: Audi — data not found at exectable_data/audi/"
+    echo "SKIP: Audi 1m — index not found at exectable_data/audi/1m/yt_aud_1m.index"
     echo "================================================"
 fi
 

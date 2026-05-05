@@ -55,16 +55,14 @@ CC=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d 
 export GPU_ARCH="sm_${CC}"
 echo "Compute capability: $GPU_ARCH"
 
-GPU_BINARY="cude_version/build/optimized_test"
-if [ ! -f "$GPU_BINARY" ]; then
-    echo "GPU binary not found at $GPU_BINARY — building now..."
-    mkdir -p logs
-    if ! make -C cude_version optimized_test \
-            FAISS_INCLUDE="$FAISS_INCLUDE" \
-            FAISS_LIB_PATH="$FAISS_LIB_PATH"; then
-        echo "ERROR: build failed. Aborting."
-        exit 1
-    fi
+echo "Rebuilding GPU binary for $GPU_ARCH..."
+rm -rf cude_version/build
+if ! make -C cude_version optimized_test \
+        ARCH="-gencode arch=compute_${CC},code=sm_${CC}" \
+        FAISS_INCLUDE="$FAISS_INCLUDE" \
+        FAISS_LIB_PATH="$FAISS_LIB_PATH"; then
+    echo "ERROR: build failed. Aborting."
+    exit 1
 fi
 
 echo ""
