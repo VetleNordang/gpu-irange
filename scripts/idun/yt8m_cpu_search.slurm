@@ -88,20 +88,20 @@ run_search() {
 for SIZE in 1m 2m 4m 8m; do
 
     run_search "video $SIZE" \
-        "exectable_data/video/$SIZE/youtube_rgb_$SIZE.bin"   \
-        "exectable_data/video/$SIZE/youtube_rgb_query.bin"   \
-        "exectable_data/video/$SIZE/youtube_rgb_$SIZE.index" \
-        "exectable_data/video/$SIZE/query_ranges/qr"         \
-        "exectable_data/video/$SIZE/groundtruth/gt"          \
-        "exectable_data/video/$SIZE/results/res"
+        "executable_data/video/$SIZE/youtube_rgb_$SIZE.bin"   \
+        "executable_data/video/$SIZE/youtube_rgb_query.bin"   \
+        "executable_data/video/$SIZE/youtube_rgb_$SIZE.index" \
+        "executable_data/video/$SIZE/query_ranges/qr"         \
+        "executable_data/video/$SIZE/groundtruth/gt"          \
+        "executable_data/video/$SIZE/results/res"
 
     run_search "audi $SIZE" \
-        "exectable_data/audi/$SIZE/yt_aud_$SIZE.bin"   \
-        "exectable_data/audi/$SIZE/yt_aud_query.bin"   \
-        "exectable_data/audi/$SIZE/yt_aud_$SIZE.index" \
-        "exectable_data/audi/$SIZE/query_ranges/qr"    \
-        "exectable_data/audi/$SIZE/groundtruth/gt"     \
-        "exectable_data/audi/$SIZE/results/res"
+        "executable_data/audi/$SIZE/yt_aud_$SIZE.bin"   \
+        "executable_data/audi/$SIZE/yt_aud_query.bin"   \
+        "executable_data/audi/$SIZE/yt_aud_$SIZE.index" \
+        "executable_data/audi/$SIZE/query_ranges/qr"    \
+        "executable_data/audi/$SIZE/groundtruth/gt"     \
+        "executable_data/audi/$SIZE/results/res"
 
 done
 
@@ -113,7 +113,7 @@ echo ""
 echo "Results:"
 for SIZE in 1m 2m 4m 8m; do
     for MOD in video audi; do
-        DIR="exectable_data/$MOD/$SIZE/results"
+        DIR="executable_data/$MOD/$SIZE/results"
         COUNT=$(ls "$DIR"/*.csv 2>/dev/null | wc -l)
         if [ "$COUNT" -gt 0 ]; then
             echo "  [OK] $MOD/$SIZE  ($COUNT CSV files)"

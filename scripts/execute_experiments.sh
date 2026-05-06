@@ -20,7 +20,7 @@
 #   - pq:   GPU with PQ compression
 #   - all:  CPU → GPU → GPU PQ (full workflow)
 #
-# Results saved to: exectable_data/[dataset]/results/[mode]/
+# Results saved to: executable_data/[dataset]/results/[mode]/
 # Logs output to: logs/execute_experiments.log
 #
 ###############################################################################
@@ -33,7 +33,7 @@ PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 CUDE_DIR="$PROJECT_ROOT/cude_version"
 LOG_DIR="$PROJECT_ROOT/logs"
 LOG_FILE="$LOG_DIR/execute_experiments.log"
-DATA_ROOT="$PROJECT_ROOT/exectable_data"
+DATA_ROOT="$PROJECT_ROOT/executable_data"
 
 # Create logs directory with fallback
 if ! mkdir -p "$LOG_DIR" 2>/dev/null; then
@@ -149,15 +149,18 @@ if [ "$MODE" == "cpu" ] || [ "$MODE" == "all" ]; then
                 dataset_name="gist1m 1000k"
                 ;;
             audi)
-                log_info "  Skipping audi (CPU implementation may not support this dataset)"
-                continue
+                data_path="$DATA_ROOT/audi/1m/yt_aud_1m.bin"
+                query_path="$DATA_ROOT/audi/1m/yt_aud_query.bin"
+                index_file="$DATA_ROOT/audi/1m/yt_aud_1m.index"
+                result_prefix="$DATA_ROOT/audi/1m/results/cpu/results"
+                dataset_name="Audi 1m"
                 ;;
             video)
-                data_path="$DATA_ROOT/video/youtube_rgb_sorted.bin"
-                query_path="$DATA_ROOT/video/youtube_rgb_query.bin"
-                index_file="$DATA_ROOT/video/youtube_rgb.index"
-                result_prefix="$DATA_ROOT/video/results/cpu/results"
-                dataset_name="Video"
+                data_path="$DATA_ROOT/video/1m/youtube_rgb_1m.bin"
+                query_path="$DATA_ROOT/video/1m/youtube_rgb_query.bin"
+                index_file="$DATA_ROOT/video/1m/youtube_rgb_1m.index"
+                result_prefix="$DATA_ROOT/video/1m/results/cpu/results"
+                dataset_name="Video 1m"
                 ;;
             *)
                 log_error "Unknown dataset: $dataset"
@@ -225,20 +228,20 @@ if [ "$MODE" == "gpu" ] || [ "$MODE" == "all" ]; then
                 v_results="$DATA_ROOT/gist1m/$size/results/gpu_normal/results_${size}"
                 ;;
             audi)
-                v_data="$DATA_ROOT/audi/yt_aud_sorted_vec_by_attr.bin"
-                v_query="$DATA_ROOT/audi/yt_aud_ranged_queries.bin"
-                v_index="$DATA_ROOT/audi/yt_aud_irangegraph_M32.bin"
-                v_ranges="$DATA_ROOT/audi/query_ranges/query_ranges"
-                v_groundtruth="$DATA_ROOT/audi/ground_truth/ground_truth"
-                v_results="$DATA_ROOT/audi/results/gpu_normal/results"
+                v_data="$DATA_ROOT/audi/1m/yt_aud_1m.bin"
+                v_query="$DATA_ROOT/audi/1m/yt_aud_query.bin"
+                v_index="$DATA_ROOT/audi/1m/yt_aud_1m.index"
+                v_ranges="$DATA_ROOT/audi/1m/query_ranges/qr"
+                v_groundtruth="$DATA_ROOT/audi/1m/groundtruth/gt"
+                v_results="$DATA_ROOT/audi/1m/results/gpu_normal/results"
                 ;;
             video)
-                v_data="$DATA_ROOT/video/youtube_rgb_sorted.bin"
-                v_query="$DATA_ROOT/video/youtube_rgb_query.bin"
-                v_index="$DATA_ROOT/video/youtube_rgb.index"
-                v_ranges="$DATA_ROOT/video/query_ranges/query_ranges"
-                v_groundtruth="$DATA_ROOT/video/ground_truth/ground_truth"
-                v_results="$DATA_ROOT/video/results/gpu_normal/results"
+                v_data="$DATA_ROOT/video/1m/youtube_rgb_1m.bin"
+                v_query="$DATA_ROOT/video/1m/youtube_rgb_query.bin"
+                v_index="$DATA_ROOT/video/1m/youtube_rgb_1m.index"
+                v_ranges="$DATA_ROOT/video/1m/query_ranges/qr"
+                v_groundtruth="$DATA_ROOT/video/1m/groundtruth/gt"
+                v_results="$DATA_ROOT/video/1m/results/gpu_normal/results"
                 ;;
             *)
                 log_error "Unknown dataset: $dataset"
@@ -305,25 +308,25 @@ if [ "$MODE" == "pq" ] || [ "$MODE" == "all" ]; then
                 m_comp=320
                 ;;
             audi)
-                v_data="$DATA_ROOT/audi/yt_aud_sorted_vec_by_attr.bin"
-                v_query="$DATA_ROOT/audi/yt_aud_ranged_queries.bin"
-                v_index="$DATA_ROOT/audi/yt_aud_irangegraph_M32.bin"
-                v_ranges="$DATA_ROOT/audi/query_ranges/query_ranges"
-                v_groundtruth="$DATA_ROOT/audi/ground_truth/ground_truth"
-                v_results="$DATA_ROOT/audi/results/gpu_pq/results_pq"
-                v_pq_model="$DATA_ROOT/audi/pq/audi_pq_m32_nb9.faiss"
-                v_pq_codes="$DATA_ROOT/audi/pq/audi_pq_codes_m32_nb9.bin"
+                v_data="$DATA_ROOT/audi/1m/yt_aud_1m.bin"
+                v_query="$DATA_ROOT/audi/1m/yt_aud_query.bin"
+                v_index="$DATA_ROOT/audi/1m/yt_aud_1m.index"
+                v_ranges="$DATA_ROOT/audi/1m/query_ranges/qr"
+                v_groundtruth="$DATA_ROOT/audi/1m/groundtruth/gt"
+                v_results="$DATA_ROOT/audi/1m/results/gpu_pq/results_pq"
+                v_pq_model="$DATA_ROOT/audi/1m/pq/audi_pq_m32_nb9.faiss"
+                v_pq_codes="$DATA_ROOT/audi/1m/pq/audi_pq_codes_m32_nb9.bin"
                 m_comp=32
                 ;;
             video)
-                v_data="$DATA_ROOT/video/youtube_rgb_sorted.bin"
-                v_query="$DATA_ROOT/video/youtube_rgb_query.bin"
-                v_index="$DATA_ROOT/video/youtube_rgb.index"
-                v_ranges="$DATA_ROOT/video/query_ranges/query_ranges"
-                v_groundtruth="$DATA_ROOT/video/ground_truth/ground_truth"
-                v_results="$DATA_ROOT/video/results/gpu_pq/results_pq"
-                v_pq_model="$DATA_ROOT/video/pq/video_pq_m256_nb9.faiss"
-                v_pq_codes="$DATA_ROOT/video/pq/video_pq_codes_m256_nb9.bin"
+                v_data="$DATA_ROOT/video/1m/youtube_rgb_1m.bin"
+                v_query="$DATA_ROOT/video/1m/youtube_rgb_query.bin"
+                v_index="$DATA_ROOT/video/1m/youtube_rgb_1m.index"
+                v_ranges="$DATA_ROOT/video/1m/query_ranges/qr"
+                v_groundtruth="$DATA_ROOT/video/1m/groundtruth/gt"
+                v_results="$DATA_ROOT/video/1m/results/gpu_pq/results_pq"
+                v_pq_model="$DATA_ROOT/video/1m/pq/video_pq_m256_nb9.faiss"
+                v_pq_codes="$DATA_ROOT/video/1m/pq/video_pq_codes_m256_nb9.bin"
                 m_comp=256
                 ;;
             *)
@@ -378,13 +381,16 @@ if [ "$MODE" == "cpu" ] || [ "$MODE" == "all" ]; then
                 result_dir="$DATA_ROOT/gist1m/$size/results/cpu"
                 ;;
             video)
-                result_dir="$DATA_ROOT/video/results/cpu"
+                result_dir="$DATA_ROOT/video/1m/results/cpu"
+                ;;
+            audi)
+                result_dir="$DATA_ROOT/audi/1m/results/cpu"
                 ;;
             *)
                 continue
                 ;;
         esac
-        
+
         if [ -d "$result_dir" ]; then
             count=$(find "$result_dir" -name "*.csv" -type f 2>/dev/null | wc -l)
             echo "  $dataset: $result_dir ($count files)" | tee -a "$LOG_FILE"
@@ -402,7 +408,10 @@ if [ "$MODE" == "gpu" ] || [ "$MODE" == "all" ]; then
                 result_dir="$DATA_ROOT/gist1m/$size/results/gpu_normal"
                 ;;
             video)
-                result_dir="$DATA_ROOT/video/results/gpu_normal"
+                result_dir="$DATA_ROOT/video/1m/results/gpu_normal"
+                ;;
+            audi)
+                result_dir="$DATA_ROOT/audi/1m/results/gpu_normal"
                 ;;
             *)
                 continue
@@ -426,13 +435,16 @@ if [ "$MODE" == "pq" ] || [ "$MODE" == "all" ]; then
                 result_dir="$DATA_ROOT/gist1m/$size/results/gpu_pq"
                 ;;
             video)
-                result_dir="$DATA_ROOT/video/results/gpu_pq"
+                result_dir="$DATA_ROOT/video/1m/results/gpu_pq"
+                ;;
+            audi)
+                result_dir="$DATA_ROOT/audi/1m/results/gpu_pq"
                 ;;
             *)
                 continue
                 ;;
         esac
-        
+
         if [ -d "$result_dir" ]; then
             count=$(find "$result_dir" -name "*.csv" -type f 2>/dev/null | wc -l)
             echo "  $dataset: $result_dir ($count files)" | tee -a "$LOG_FILE"

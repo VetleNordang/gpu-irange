@@ -27,23 +27,23 @@ cd python/plots
 
 **Output locations:**
 ```
-exectable_data/gist1m/250k/results/
+executable_data/gist1m/250k/results/
 ├── qps_gpu_vs_cpu.png
 └── recall_vs_qps.png
 
-exectable_data/gist1m/500k/results/
+executable_data/gist1m/500k/results/
 ├── qps_gpu_vs_cpu.png
 └── recall_vs_qps.png
 
-exectable_data/gist1m/750k/results/
+executable_data/gist1m/750k/results/
 ├── qps_gpu_vs_cpu.png
 └── recall_vs_qps.png
 
-exectable_data/video/results/
+executable_data/video/results/
 ├── qps_gpu_vs_cpu.png
 └── recall_vs_qps.png
 
-exectable_data/audi/results/
+executable_data/audi/results/
 ├── qps_gpu_vs_cpu.png
 └── recall_vs_qps.png
 ```

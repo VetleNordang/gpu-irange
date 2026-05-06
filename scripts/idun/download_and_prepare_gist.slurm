@@ -26,7 +26,7 @@ echo "Node:   $(hostname)"
 echo "=========================================="
 
 REPO_DIR="$SLURM_SUBMIT_DIR"
-GIST_RAW_DIR="$REPO_DIR/exectable_data/gist1m/gist"
+GIST_RAW_DIR="$REPO_DIR/executable_data/gist1m/gist"
 
 mkdir -p "$GIST_RAW_DIR"
 mkdir -p "$REPO_DIR/logs"
@@ -65,7 +65,7 @@ echo "--- Step 2: Converting to iRangeGraph binary format ---"
 
 ALL_BINS_EXIST=1
 for size in 250k 500k 750k 1000k; do
-    if [ ! -f "$REPO_DIR/exectable_data/gist1m/$size/gist_base_${size}.bin" ]; then
+    if [ ! -f "$REPO_DIR/executable_data/gist1m/$size/gist_base_${size}.bin" ]; then
         ALL_BINS_EXIST=0; break
     fi
 done
@@ -81,7 +81,7 @@ else
     python3 "$REPO_DIR/python/gist/convert_gist_to_irangegraph.py" \
         --base_fvecs  "$GIST_RAW_DIR/gist_base.fvecs" \
         --query_fvecs "$GIST_RAW_DIR/gist_query.fvecs" \
-        --out_root    "$REPO_DIR/exectable_data/gist1m" \
+        --out_root    "$REPO_DIR/executable_data/gist1m" \
         --sizes       250000,500000,750000,1000000
 
     if [ $? -ne 0 ]; then
@@ -96,7 +96,7 @@ fi
 echo ""
 echo "--- Generated files ---"
 for size in 250k 500k 750k 1000k; do
-    DIR="$REPO_DIR/exectable_data/gist1m/$size"
+    DIR="$REPO_DIR/executable_data/gist1m/$size"
     if [ -d "$DIR" ]; then
         echo "$size:"
         ls -lh "$DIR"/*.bin 2>/dev/null

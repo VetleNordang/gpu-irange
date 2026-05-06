@@ -28,7 +28,7 @@ set -e
 # Setup paths - resolve to actual location, not symlink
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
-DATA_ROOT="$PROJECT_ROOT/exectable_data"
+DATA_ROOT="$PROJECT_ROOT/executable_data"
 LOG_DIR="$PROJECT_ROOT/logs"
 LOG_FILE="$LOG_DIR/make_pq.log"
 PQ_COMPRESS="$PROJECT_ROOT/build/tests/pq_compress_only"

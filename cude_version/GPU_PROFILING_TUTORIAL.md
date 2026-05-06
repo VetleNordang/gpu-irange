@@ -19,7 +19,7 @@ Run this directly in your terminal (no script needed). Just put `nsys profile -o
 
 ```bash
 cd /workspaces/irange/cude_version
-nsys profile -o my_timeline_profile ./build/hello --data_path ../exectable_data/gist1m/500k/gist_base_500k.bin --query_path ../exectable_data/gist1m/500k/gist_query_500k.bin --M 32
+nsys profile -o my_timeline_profile ./build/hello --data_path ../executable_data/gist1m/500k/gist_base_500k.bin --query_path ../executable_data/gist1m/500k/gist_query_500k.bin --M 32
 ```
 
 ### 2. Where is it saved?
@@ -61,12 +61,12 @@ make all
 
 # Then profile the executable (which now stops itself after 11 loops):
 nvprof --metrics all --csv --log-file my_kernel_metrics.csv ./build/hello \
-    --data_path ../exectable_data/gist1m/500k/gist_base_500k.bin \
-    --query_path ../exectable_data/gist1m/500k/gist_query_500k.bin \
-    --range_saveprefix ../exectable_data/gist1m/500k/query_ranges/query_ranges_500k \
-    --groundtruth_saveprefix ../exectable_data/gist1m/500k/groundtruth/groundtruth_500k \
-    --index_file ../exectable_data/gist1m/500k/gist_500k.index \
-    --result_saveprefix ../exectable_data/gist1m/500k/results/results_500k \
+    --data_path ../executable_data/gist1m/500k/gist_base_500k.bin \
+    --query_path ../executable_data/gist1m/500k/gist_query_500k.bin \
+    --range_saveprefix ../executable_data/gist1m/500k/query_ranges/query_ranges_500k \
+    --groundtruth_saveprefix ../executable_data/gist1m/500k/groundtruth/groundtruth_500k \
+    --index_file ../executable_data/gist1m/500k/gist_500k.index \
+    --result_saveprefix ../executable_data/gist1m/500k/results/results_500k \
     --M 32
 ```
 

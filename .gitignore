@@ -6,7 +6,7 @@ build/*
 .vscode/*
 .vscode
 
-exectable_data
+executable_data
 
 cude_version/build
 cude_version/build/*

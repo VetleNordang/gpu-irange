@@ -49,8 +49,8 @@ If FAISS is missing, CMake prints a warning and skips `pq_encode`.
 - then `n * d` float32 values
 
 This is the format of files like:
-- `exectable_data/gist1m/250k/gist_base_250k.bin`
-- `exectable_data/gist1m/250k/gist_query_250k.bin`
+- `executable_data/gist1m/250k/gist_base_250k.bin`
+- `executable_data/gist1m/250k/gist_query_250k.bin`
 
 ---
 
@@ -60,11 +60,11 @@ Example for GIST 250k:
 
 ```bash
 /workspaces/irange/build/tests/pq_encode \
-  --data_path /workspaces/irange/exectable_data/gist1m/250k/gist_base_250k.bin \
-  --query_path /workspaces/irange/exectable_data/gist1m/250k/gist_query_250k.bin \
-  --pq_model_out /workspaces/irange/exectable_data/gist1m/250k/pq/gist_250k_pq.faiss \
-  --pq_codes_out /workspaces/irange/exectable_data/gist1m/250k/pq/gist_250k_codes.bin \
-  --query_codes_out /workspaces/irange/exectable_data/gist1m/250k/pq/gist_query_250k_codes.bin \
+  --data_path /workspaces/irange/executable_data/gist1m/250k/gist_base_250k.bin \
+  --query_path /workspaces/irange/executable_data/gist1m/250k/gist_query_250k.bin \
+  --pq_model_out /workspaces/irange/executable_data/gist1m/250k/pq/gist_250k_pq.faiss \
+  --pq_codes_out /workspaces/irange/executable_data/gist1m/250k/pq/gist_250k_codes.bin \
+  --query_codes_out /workspaces/irange/executable_data/gist1m/250k/pq/gist_query_250k_codes.bin \
   --M 64 \
   --nbits 8 \
   --train_size 20000
@@ -180,11 +180,11 @@ make -j2 pq_encode pq_search_adc
 
 ```bash
 /workspaces/irange/build/tests/pq_encode \
-  --data_path /workspaces/irange/exectable_data/gist1m/250k/gist_base_250k.bin \
-  --query_path /workspaces/irange/exectable_data/gist1m/250k/gist_query_250k.bin \
-  --pq_model_out /workspaces/irange/exectable_data/gist1m/250k/pq/gist_250k_pq.faiss \
-  --pq_codes_out /workspaces/irange/exectable_data/gist1m/250k/pq/gist_250k_codes.bin \
-  --query_codes_out /workspaces/irange/exectable_data/gist1m/250k/pq/gist_query_250k_codes.bin \
+  --data_path /workspaces/irange/executable_data/gist1m/250k/gist_base_250k.bin \
+  --query_path /workspaces/irange/executable_data/gist1m/250k/gist_query_250k.bin \
+  --pq_model_out /workspaces/irange/executable_data/gist1m/250k/pq/gist_250k_pq.faiss \
+  --pq_codes_out /workspaces/irange/executable_data/gist1m/250k/pq/gist_250k_codes.bin \
+  --query_codes_out /workspaces/irange/executable_data/gist1m/250k/pq/gist_query_250k_codes.bin \
   --M 64 --nbits 8 --train_size 20000
 ```
 
@@ -192,10 +192,10 @@ make -j2 pq_encode pq_search_adc
 
 ```bash
 /workspaces/irange/build/tests/pq_search_adc \
-  --pq_model /workspaces/irange/exectable_data/gist1m/250k/pq/gist_250k_pq.faiss \
-  --pq_codes /workspaces/irange/exectable_data/gist1m/250k/pq/gist_250k_codes.bin \
-  --query_path /workspaces/irange/exectable_data/gist1m/250k/gist_query_250k.bin \
-  --out_csv /workspaces/irange/exectable_data/gist1m/250k/pq/adc_top10_q100.csv \
+  --pq_model /workspaces/irange/executable_data/gist1m/250k/pq/gist_250k_pq.faiss \
+  --pq_codes /workspaces/irange/executable_data/gist1m/250k/pq/gist_250k_codes.bin \
+  --query_path /workspaces/irange/executable_data/gist1m/250k/gist_query_250k.bin \
+  --out_csv /workspaces/irange/executable_data/gist1m/250k/pq/adc_top10_q100.csv \
   --topk 10 --max_queries 100
 ```
 

@@ -5,7 +5,7 @@
 # Skips any size whose index file already exists.
 
 BUILDINDEX="./build/tests/buildindex"
-DATA_ROOT="exectable_data/gist1m"
+DATA_ROOT="executable_data/gist1m"
 
 M=32
 EF_CONSTRUCTION=200

@@ -100,12 +100,12 @@ build_index() {
 for SIZE in 1m 2m 4m 8m; do
 
     build_index "video $SIZE" \
-        "exectable_data/video/$SIZE/youtube_rgb_$SIZE.bin" \
-        "exectable_data/video/$SIZE/youtube_rgb_$SIZE.index"
+        "executable_data/video/$SIZE/youtube_rgb_$SIZE.bin" \
+        "executable_data/video/$SIZE/youtube_rgb_$SIZE.index"
 
     build_index "audi $SIZE" \
-        "exectable_data/audi/$SIZE/yt_aud_$SIZE.bin" \
-        "exectable_data/audi/$SIZE/yt_aud_$SIZE.index"
+        "executable_data/audi/$SIZE/yt_aud_$SIZE.bin" \
+        "executable_data/audi/$SIZE/yt_aud_$SIZE.index"
 
 done
 
@@ -118,8 +118,8 @@ echo "Indexes:"
 for SIZE in 1m 2m 4m 8m; do
     for MOD in video audi; do
         case "$MOD" in
-            video) IDX="exectable_data/video/$SIZE/youtube_rgb_$SIZE.index" ;;
-            audi)  IDX="exectable_data/audi/$SIZE/yt_aud_$SIZE.index" ;;
+            video) IDX="executable_data/video/$SIZE/youtube_rgb_$SIZE.index" ;;
+            audi)  IDX="executable_data/audi/$SIZE/yt_aud_$SIZE.index" ;;
         esac
         if [ -f "$IDX" ]; then
             echo "  [OK] $IDX  ($(du -sh "$IDX" | cut -f1))"

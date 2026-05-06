@@ -120,12 +120,12 @@ scancel -u $USER                         # cancel all your jobs
 After the pipelines finish, results are written to:
 
 ```
-exectable_data/gist1m/250k/results/
-exectable_data/gist1m/500k/results/
-exectable_data/gist1m/750k/results/
-exectable_data/gist1m/1000k/results/
-exectable_data/video/1m/results/
-exectable_data/audi/1m/results/
+executable_data/gist1m/250k/results/
+executable_data/gist1m/500k/results/
+executable_data/gist1m/750k/results/
+executable_data/gist1m/1000k/results/
+executable_data/video/1m/results/
+executable_data/audi/1m/results/
 ```
 
 Logs are in `logs/` named by job type and SLURM job ID.

@@ -3,8 +3,8 @@
 # IDUN Data Preparation Job: Download and convert YouTube-8M (all 4 sizes)
 #
 # Produces 1M, 2M, 4M, and 8M vector partitions for both:
-#   video-RGB  (1024-dim)  →  exectable_data/video/{1m,2m,4m,8m}/
-#   audio      ( 128-dim)  →  exectable_data/audi/{1m,2m,4m,8m}/
+#   video-RGB  (1024-dim)  →  executable_data/video/{1m,2m,4m,8m}/
+#   audio      ( 128-dim)  →  executable_data/audi/{1m,2m,4m,8m}/
 #
 # Disk usage:
 #   Scratch ($USERWORK) during job : ~68 GB  (TFRecords + temp, auto-deleted)
@@ -41,11 +41,11 @@ mkdir -p "$REPO_DIR/logs"
 if [ -n "$USERWORK" ]; then
     RAW_DIR="$USERWORK/yt8m_raw_${SLURM_JOB_ID}"
 else
-    RAW_DIR="$REPO_DIR/exectable_data/yt8m_raw"
+    RAW_DIR="$REPO_DIR/executable_data/yt8m_raw"
 fi
 
 echo "Scratch dir  : $RAW_DIR"
-echo "Output dir   : $REPO_DIR/exectable_data"
+echo "Output dir   : $REPO_DIR/executable_data"
 echo ""
 
 # ── Step 1: Set up Python environment ────────────────────────────────────────
@@ -85,7 +85,7 @@ echo "--- Step 2: Download and convert (1M, 2M, 4M, 8M) ---"
 
 python3 "$REPO_DIR/python/youtube8m/convert_youtube8m_to_irangegraph.py" \
     --raw_dir     "$RAW_DIR"                        \
-    --out_root    "$REPO_DIR/exectable_data"         \
+    --out_root    "$REPO_DIR/executable_data"         \
     --sizes       "1000000,2000000,4000000,8000000"  \
     --num_queries 1000                               \
     --chunk_size  500000                             \
@@ -107,7 +107,7 @@ echo ""
 echo "--- Generated files ---"
 for modality in video audi; do
     for size in 1m 2m 4m 8m; do
-        DIR="$REPO_DIR/exectable_data/$modality/$size"
+        DIR="$REPO_DIR/executable_data/$modality/$size"
         if [ -d "$DIR" ]; then
             echo "$modality/$size:"
             ls -lh "$DIR"/*.bin 2>/dev/null | awk '{print "  "$NF, $5}'

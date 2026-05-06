@@ -12,8 +12,8 @@
 #   ./download_data.sh gist youtube   # explicit list
 #
 # Sizes produced:
-#   GIST1M  : 250k / 500k / 750k / 1000k  (exectable_data/gist1m/)
-#   YouTube : 1M                           (exectable_data/video/1m/ and audi/1m/)
+#   GIST1M  : 250k / 500k / 750k / 1000k  (executable_data/gist1m/)
+#   YouTube : 1M                           (executable_data/video/1m/ and audi/1m/)
 #
 
 set -e
@@ -23,7 +23,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOG_DIR="$PROJECT_ROOT/logs"
 LOG_FILE="$LOG_DIR/download_data.log"
 PYTHON_DIR="$PROJECT_ROOT/python"
-DATA_ROOT="$PROJECT_ROOT/exectable_data"
+DATA_ROOT="$PROJECT_ROOT/executable_data"
 
 mkdir -p "$LOG_DIR"
 > "$LOG_FILE"

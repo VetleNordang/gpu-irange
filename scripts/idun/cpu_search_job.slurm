@@ -48,7 +48,7 @@ if [ ! -f "build/tests/search" ]; then
     echo "Build complete."
 fi
 
-bash run_all_searches.sh
+bash scripts/run_all_searches.sh
 
 echo "=========================================="
 echo "CPU Search completed: $(date)"

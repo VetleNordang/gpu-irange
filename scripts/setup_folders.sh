@@ -8,9 +8,9 @@
 # Usage: ./setup_folders.sh
 #
 # Creates:
-# - exectable_data/gist1m/[250k|500k|750k|1000k]/results/{cpu,gpu_normal,gpu_pq,analysis}/
-# - exectable_data/audi/results/{cpu,gpu_normal,gpu_pq,analysis}/
-# - exectable_data/video/results/{cpu,gpu_normal,gpu_pq,analysis}/
+# - executable_data/gist1m/[250k|500k|750k|1000k]/results/{cpu,gpu_normal,gpu_pq,analysis}/
+# - executable_data/audi/[1m|2m|4m|8m]/results/{cpu,gpu_normal,gpu_pq,analysis}/
+# - executable_data/video/[1m|2m|4m|8m]/results/{cpu,gpu_normal,gpu_pq,analysis}/
 #
 # Logs output to: logs/setup_folders.log
 #
@@ -21,7 +21,7 @@ set -e
 # Setup paths - resolve to actual location, not symlink
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
-DATA_ROOT="$PROJECT_ROOT/exectable_data"
+DATA_ROOT="$PROJECT_ROOT/executable_data"
 LOG_DIR="$PROJECT_ROOT/logs"
 LOG_FILE="$LOG_DIR/setup_folders.log"
 
@@ -78,6 +78,7 @@ echo "" | tee -a "$LOG_FILE"
 
 # Datasets configuration
 declare -a GIST_SIZES=("250k" "500k" "750k" "1000k")
+declare -a YT8M_SIZES=("1m" "2m" "4m" "8m")
 declare -a RESULT_SUBDIRS=("cpu" "gpu_normal" "gpu_pq" "analysis")
 
 # ============================================================================
@@ -116,15 +117,16 @@ log_header "Creating AUDI Folders"
 
 audi_dir="$DATA_ROOT/audi"
 if [ -d "$audi_dir" ]; then
-    audi_results="$audi_dir/results"
-    mkdir -p "$audi_results"
-    log_info "Created: audi/results"
-    
-    for subdir in "${RESULT_SUBDIRS[@]}"; do
-        target_dir="$audi_results/$subdir"
-        mkdir -p "$target_dir"
-        touch "$target_dir/.gitkeep"
-        log_info "  ├─ Created: $subdir/"
+    for size in "${YT8M_SIZES[@]}"; do
+        size_dir="$audi_dir/$size"
+        mkdir -p "$size_dir"
+        log_info "Created: audi/$size"
+        for subdir in "${RESULT_SUBDIRS[@]}"; do
+            target_dir="$size_dir/results/$subdir"
+            mkdir -p "$target_dir"
+            touch "$target_dir/.gitkeep"
+            log_info "  ├─ Created: results/$subdir/"
+        done
     done
 else
     log_error "Audi dataset not found: $audi_dir"
@@ -139,15 +141,16 @@ log_header "Creating VIDEO Folders"
 
 video_dir="$DATA_ROOT/video"
 if [ -d "$video_dir" ]; then
-    video_results="$video_dir/results"
-    mkdir -p "$video_results"
-    log_info "Created: video/results"
-    
-    for subdir in "${RESULT_SUBDIRS[@]}"; do
-        target_dir="$video_results/$subdir"
-        mkdir -p "$target_dir"
-        touch "$target_dir/.gitkeep"
-        log_info "  ├─ Created: $subdir/"
+    for size in "${YT8M_SIZES[@]}"; do
+        size_dir="$video_dir/$size"
+        mkdir -p "$size_dir"
+        log_info "Created: video/$size"
+        for subdir in "${RESULT_SUBDIRS[@]}"; do
+            target_dir="$size_dir/results/$subdir"
+            mkdir -p "$target_dir"
+            touch "$target_dir/.gitkeep"
+            log_info "  ├─ Created: results/$subdir/"
+        done
     done
 else
     log_error "Video dataset not found: $video_dir"
@@ -165,7 +168,7 @@ log_info "Log file: $LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
 echo "Folder structure created:" | tee -a "$LOG_FILE"
-echo "  ✓ exectable_data/gist1m/{250k,500k,750k,1000k}/results/{cpu,gpu_normal,gpu_pq,analysis}/" | tee -a "$LOG_FILE"
-echo "  ✓ exectable_data/audi/results/{cpu,gpu_normal,gpu_pq,analysis}/" | tee -a "$LOG_FILE"
-echo "  ✓ exectable_data/video/results/{cpu,gpu_normal,gpu_pq,analysis}/" | tee -a "$LOG_FILE"
+echo "  ✓ executable_data/gist1m/{250k,500k,750k,1000k}/results/{cpu,gpu_normal,gpu_pq,analysis}/" | tee -a "$LOG_FILE"
+echo "  ✓ executable_data/audi/{1m,2m,4m,8m}/results/{cpu,gpu_normal,gpu_pq,analysis}/" | tee -a "$LOG_FILE"
+echo "  ✓ executable_data/video/{1m,2m,4m,8m}/results/{cpu,gpu_normal,gpu_pq,analysis}/" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"

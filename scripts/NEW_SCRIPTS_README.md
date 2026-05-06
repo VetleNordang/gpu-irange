@@ -37,8 +37,8 @@ Creates organized result directories for all datasets.
 **What it does:**
 - Creates `results/` folder structure under each dataset
 - Creates subfolders: `cpu/`, `gpu_normal/`, `gpu_pq/`, `analysis/`
-- For gist1m: `exectable_data/gist1m/{250k,500k,750k,1000k}/results/`
-- For audi and video: `exectable_data/{audi,video}/results/`
+- For gist1m: `executable_data/gist1m/{250k,500k,750k,1000k}/results/`
+- For audi and video: `executable_data/{audi,video}/results/`
 - Adds `.gitkeep` files to preserve directory structure
 
 **Log file:** `logs/setup_folders.log`
@@ -196,7 +196,7 @@ Phase 2: GPU Normal Experiments
 
 Results Summary:
 CPU Results:
-  gist250k: exectable_data/gist1m/250k/results/cpu (5 files)
+  gist250k: executable_data/gist1m/250k/results/cpu (5 files)
 ```
 
 ---
@@ -289,7 +289,7 @@ cd /workspaces/irange/scripts
 - Run: `cd /workspaces/irange && cmake -B build && cmake --build build`
 
 **"Dataset not found"**
-- Verify dataset exists in `exectable_data/`
+- Verify dataset exists in `executable_data/`
 
 **"Index file not found"**
 - Need to build indexes first (run `buildindex` test)
@@ -321,7 +321,7 @@ cd /workspaces/irange/scripts
 │       └── buildindex           ← Index builder executable
 ├── cude_version/                ← GPU code
 │   └── Makefile                ← GPU targets: make, make pq_target, make run, make run_pq
-└── exectable_data/
+└── executable_data/
     ├── gist1m/
     │   ├── 250k/
     │   │   ├── gist_base_250k.bin

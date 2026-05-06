@@ -42,7 +42,7 @@ Updated GPU PQ result path to save in `results/pq/` subdirectory:
 ### 1. **scripts/setup_result_directories.sh** ✓
 Creates organized directory structure for all datasets:
 ```bash
-exectable_data/[dataset]/results/
+executable_data/[dataset]/results/
 ├── cpu/    (CPU search results)
 ├── gpu/    (GPU normal search results)
 └── pq/     (GPU PQ search results)
@@ -79,7 +79,7 @@ bash scripts/check_results_organization.sh
 
 ## Result Directory Structure
 ```
-exectable_data/
+executable_data/
 ├── audi/results/
 │   ├── cpu/      (CPU results)
 │   ├── gpu/      (GPU results)

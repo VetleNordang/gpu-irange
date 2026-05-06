@@ -185,14 +185,14 @@ index.TopDown_nodeentries_search(query_vector, k, result);
 cd /workspaces/irange/build/tests
 
 ./pq_encode \
-    --data_path_comp /workspaces/irange/exectable_data/gist1m/250k/gist_base_250k.bin \
-    --query_path /workspaces/irange/exectable_data/gist1m/250k/gist_query_250k.bin \
-    --range_saveprefix /workspaces/irange/exectable_data/gist1m/250k/query_ranges/query_ranges_250k \
-    --groundtruth_saveprefix /workspaces/irange/exectable_data/gist1m/250k/groundtruth/groundtruth_250k \
-    --index_file /workspaces/irange/exectable_data/gist1m/250k/gist_250k.index \
-    --result_saveprefix /workspaces/irange/exectable_data/gist1m/250k/results/results_250k_pq \
-    --pq_model_out /workspaces/irange/exectable_data/gist1m/250k/pq/gist_250k_pq.faiss \
-    --pq_codes_out /workspaces/irange/exectable_data/gist1m/250k/pq/gist_250k_codes.bin \
+    --data_path_comp /workspaces/irange/executable_data/gist1m/250k/gist_base_250k.bin \
+    --query_path /workspaces/irange/executable_data/gist1m/250k/gist_query_250k.bin \
+    --range_saveprefix /workspaces/irange/executable_data/gist1m/250k/query_ranges/query_ranges_250k \
+    --groundtruth_saveprefix /workspaces/irange/executable_data/gist1m/250k/groundtruth/groundtruth_250k \
+    --index_file /workspaces/irange/executable_data/gist1m/250k/gist_250k.index \
+    --result_saveprefix /workspaces/irange/executable_data/gist1m/250k/results/results_250k_pq \
+    --pq_model_out /workspaces/irange/executable_data/gist1m/250k/pq/gist_250k_pq.faiss \
+    --pq_codes_out /workspaces/irange/executable_data/gist1m/250k/pq/gist_250k_codes.bin \
     --M 32
 ```
 
@@ -202,14 +202,14 @@ cd /workspaces/irange/build/tests
 cd /workspaces/irange/build/tests
 
 ./pq_encode \
-    --data_path_comp ../../exectable_data/gist1m/250k/gist_base_250k.bin \
-    --query_path ../../exectable_data/gist1m/250k/gist_query_250k.bin \
-    --range_saveprefix ../../exectable_data/gist1m/250k/query_ranges/query_ranges_250k \
-    --groundtruth_saveprefix ../../exectable_data/gist1m/250k/groundtruth/groundtruth_250k \
-    --index_file ../../exectable_data/gist1m/250k/gist_250k.index \
-    --result_saveprefix ../../exectable_data/gist1m/250k/results/results_250k_pq \
-    --pq_model_out ../../exectable_data/gist1m/250k/pq/gist_250k_pq.faiss \
-    --pq_codes_out ../../exectable_data/gist1m/250k/pq/gist_250k_codes.bin \
+    --data_path_comp ../../executable_data/gist1m/250k/gist_base_250k.bin \
+    --query_path ../../executable_data/gist1m/250k/gist_query_250k.bin \
+    --range_saveprefix ../../executable_data/gist1m/250k/query_ranges/query_ranges_250k \
+    --groundtruth_saveprefix ../../executable_data/gist1m/250k/groundtruth/groundtruth_250k \
+    --index_file ../../executable_data/gist1m/250k/gist_250k.index \
+    --result_saveprefix ../../executable_data/gist1m/250k/results/results_250k_pq \
+    --pq_model_out ../../executable_data/gist1m/250k/pq/gist_250k_pq.faiss \
+    --pq_codes_out ../../executable_data/gist1m/250k/pq/gist_250k_codes.bin \
     --M 32
 ```
 
