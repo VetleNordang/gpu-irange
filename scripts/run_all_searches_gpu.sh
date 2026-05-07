@@ -107,17 +107,23 @@ run_gpu_search() {
 
 
 # ============================================
-# Video (YouTube RGB) Index
+# Video (YouTube RGB) Indexes — all sizes
 # ============================================
-run_gpu_search "Video 1m (YouTube RGB)" \
-    "executable_data/video/1m/results/results_gpu" \
-    "video" \
-    --data_path  executable_data/video/1m/youtube_rgb_1m.bin \
-    --query_path executable_data/video/1m/youtube_rgb_query.bin \
-    --range_saveprefix       executable_data/video/1m/query_ranges/qr \
-    --groundtruth_saveprefix executable_data/video/1m/groundtruth/gt \
-    --index_file             executable_data/video/1m/youtube_rgb_1m.index \
-    --result_saveprefix      executable_data/video/1m/results/results_gpu
+for size in 1m 2m 4m 8m; do
+    if [ -f "executable_data/video/${size}/youtube_rgb_${size}.index" ]; then
+        run_gpu_search "Video ${size} (YouTube RGB)" \
+            "executable_data/video/${size}/results/results_gpu" \
+            "video" \
+            --data_path  executable_data/video/${size}/youtube_rgb_${size}.bin \
+            --query_path executable_data/video/${size}/youtube_rgb_query.bin \
+            --range_saveprefix       executable_data/video/${size}/query_ranges/qr \
+            --groundtruth_saveprefix executable_data/video/${size}/groundtruth/gt \
+            --index_file             executable_data/video/${size}/youtube_rgb_${size}.index \
+            --result_saveprefix      executable_data/video/${size}/results/results_gpu
+    else
+        echo "SKIP: Video ${size} — index not found"
+    fi
+done
 
 # ============================================
 # GIST 250k Index
@@ -175,24 +181,23 @@ run_gpu_search "GIST 1000k" \
 
 
 # ============================================
-# Audi Index  (skip if data not present)
+# Audi Indexes — all sizes
 # ============================================
-if [ -f "executable_data/audi/1m/yt_aud_1m.index" ]; then
-    run_gpu_search "Audi 1m" \
-        "executable_data/audi/1m/results/results_gpu" \
-        "audi" \
-        --data_path executable_data/audi/1m/yt_aud_1m.bin \
-        --query_path executable_data/audi/1m/yt_aud_query.bin \
-        --range_saveprefix executable_data/audi/1m/query_ranges/qr \
-        --groundtruth_saveprefix executable_data/audi/1m/groundtruth/gt \
-        --index_file executable_data/audi/1m/yt_aud_1m.index \
-        --result_saveprefix executable_data/audi/1m/results/results_gpu
-else
-    echo ""
-    echo "================================================"
-    echo "SKIP: Audi 1m — index not found at executable_data/audi/1m/yt_aud_1m.index"
-    echo "================================================"
-fi
+for size in 1m 2m 4m 8m; do
+    if [ -f "executable_data/audi/${size}/yt_aud_${size}.index" ]; then
+        run_gpu_search "Audi ${size}" \
+            "executable_data/audi/${size}/results/results_gpu" \
+            "audi" \
+            --data_path executable_data/audi/${size}/yt_aud_${size}.bin \
+            --query_path executable_data/audi/${size}/yt_aud_query.bin \
+            --range_saveprefix executable_data/audi/${size}/query_ranges/qr \
+            --groundtruth_saveprefix executable_data/audi/${size}/groundtruth/gt \
+            --index_file executable_data/audi/${size}/yt_aud_${size}.index \
+            --result_saveprefix executable_data/audi/${size}/results/results_gpu
+    else
+        echo "SKIP: Audi ${size} — index not found"
+    fi
+done
 
 # ============================================
 # Summary
@@ -220,11 +225,9 @@ if [ ${#FAILURES[@]} -gt 0 ]; then
 fi
 
 echo "GPU Results saved in:"
-echo "  - executable_data/gist1m/250k/results/results_250k_gpu*.csv"
-echo "  - executable_data/gist1m/500k/results/results_500k_gpu*.csv"
-echo "  - executable_data/gist1m/750k/results/results_750k_gpu*.csv"
-echo "  - executable_data/video/results/results_gpu*.csv"
-echo "  - executable_data/audi/results/results_gpu*.csv"
+echo "  - executable_data/gist1m/{250k,500k,750k,1000k}/results/results_*_gpu*.csv"
+echo "  - executable_data/video/{1m,2m,4m,8m}/results/results_gpu*.csv"
+echo "  - executable_data/audi/{1m,2m,4m,8m}/results/results_gpu*.csv"
 echo "================================================"
 
 # Exit with error if any dataset failed

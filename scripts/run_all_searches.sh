@@ -1,133 +1,109 @@
 #!/bin/bash
 
-# Script to run searches on all built indexes (CPU version only)
+# CPU search on all built indexes. Continues past failures and prints a summary.
 
 echo "================================================"
-echo "Running Search Tests on All Indexes"
+echo "Running CPU Search Tests on All Indexes"
 echo "================================================"
 
-# Default parameters
 M=32
 SEARCH_EXECUTABLE="./build/tests/search"
 
-# Check if search executable exists
 if [ ! -f "$SEARCH_EXECUTABLE" ]; then
-    echo "Error: Search executable not found at $SEARCH_EXECUTABLE"
-    echo "Please run build_all_variations.sh first to build the project"
+    echo "ERROR: search binary not found at $SEARCH_EXECUTABLE"
     exit 1
 fi
 
+declare -a SUCCESSES=()
+declare -a FAILURES=()
+declare -a SKIPS=()
+
+run_cpu_search() {
+    local dataset_name="$1"
+    local index_file="$2"
+    shift 2
+    local args=("$@")
+
+    echo ""
+    echo "================================================"
+    echo "CPU Search: $dataset_name"
+    echo "================================================"
+
+    if [ ! -f "$index_file" ]; then
+        echo "SKIP: index not found — $index_file"
+        SKIPS+=("$dataset_name")
+        return
+    fi
+
+    local t_start=$SECONDS
+    if "$SEARCH_EXECUTABLE" "${args[@]}" --M "$M"; then
+        local elapsed=$(( SECONDS - t_start ))
+        echo "✓ $dataset_name completed (${elapsed}s)"
+        SUCCESSES+=("$dataset_name")
+    else
+        local exit_code=$?
+        local elapsed=$(( SECONDS - t_start ))
+        echo "✗ $dataset_name FAILED (exit code: $exit_code, elapsed: ${elapsed}s)"
+        FAILURES+=("$dataset_name")
+    fi
+}
+
+# ── GIST ──────────────────────────────────────────────────────────────────────
+for size in 250k 500k 750k 1000k; do
+    run_cpu_search "GIST ${size}" \
+        "executable_data/gist1m/${size}/gist_${size}.index" \
+        --data_path              executable_data/gist1m/${size}/gist_base_${size}.bin \
+        --query_path             executable_data/gist1m/${size}/gist_query_${size}.bin \
+        --range_saveprefix       executable_data/gist1m/${size}/query_ranges/query_ranges_${size} \
+        --groundtruth_saveprefix executable_data/gist1m/${size}/groundtruth/groundtruth_${size} \
+        --index_file             executable_data/gist1m/${size}/gist_${size}.index \
+        --result_saveprefix      executable_data/gist1m/${size}/results/results_${size}
+done
+
+# ── Video ─────────────────────────────────────────────────────────────────────
+for size in 1m 2m 4m 8m; do
+    run_cpu_search "Video ${size} (YouTube RGB)" \
+        "executable_data/video/${size}/youtube_rgb_${size}.index" \
+        --data_path              executable_data/video/${size}/youtube_rgb_${size}.bin \
+        --query_path             executable_data/video/${size}/youtube_rgb_query.bin \
+        --range_saveprefix       executable_data/video/${size}/query_ranges/qr \
+        --groundtruth_saveprefix executable_data/video/${size}/groundtruth/gt \
+        --index_file             executable_data/video/${size}/youtube_rgb_${size}.index \
+        --result_saveprefix      executable_data/video/${size}/results/results
+done
+
+# ── Audi ──────────────────────────────────────────────────────────────────────
+for size in 1m 2m 4m 8m; do
+    run_cpu_search "Audi ${size}" \
+        "executable_data/audi/${size}/yt_aud_${size}.index" \
+        --data_path              executable_data/audi/${size}/yt_aud_${size}.bin \
+        --query_path             executable_data/audi/${size}/yt_aud_query.bin \
+        --range_saveprefix       executable_data/audi/${size}/query_ranges/qr \
+        --groundtruth_saveprefix executable_data/audi/${size}/groundtruth/gt \
+        --index_file             executable_data/audi/${size}/yt_aud_${size}.index \
+        --result_saveprefix      executable_data/audi/${size}/results/results
+done
+
+# ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "================================================"
-echo "Searching GIST 250k Index"
+echo "CPU Search Complete"
 echo "================================================"
-if [ ! -f "executable_data/gist1m/250k/gist_250k.index" ]; then
-    echo "SKIP: index not found, run build_gist_indexes.sh first"
-else
-$SEARCH_EXECUTABLE \
-    --data_path executable_data/gist1m/250k/gist_base_250k.bin \
-    --query_path executable_data/gist1m/250k/gist_query_250k.bin \
-    --range_saveprefix executable_data/gist1m/250k/query_ranges/query_ranges_250k \
-    --groundtruth_saveprefix executable_data/gist1m/250k/groundtruth/groundtruth_250k \
-    --index_file executable_data/gist1m/250k/gist_250k.index \
-    --result_saveprefix executable_data/gist1m/250k/results/results_250k \
-    --M $M
+
+if [ ${#SUCCESSES[@]} -gt 0 ]; then
+    echo "✓ Passed (${#SUCCESSES[@]}):"
+    for d in "${SUCCESSES[@]}"; do echo "    $d"; done
 fi
 
-echo ""
-echo "================================================"
-echo "Searching GIST 500k Index"
-echo "================================================"
-if [ ! -f "executable_data/gist1m/500k/gist_500k.index" ]; then
-    echo "SKIP: index not found, run build_gist_indexes.sh first"
-else
-$SEARCH_EXECUTABLE \
-    --data_path executable_data/gist1m/500k/gist_base_500k.bin \
-    --query_path executable_data/gist1m/500k/gist_query_500k.bin \
-    --range_saveprefix executable_data/gist1m/500k/query_ranges/query_ranges_500k \
-    --groundtruth_saveprefix executable_data/gist1m/500k/groundtruth/groundtruth_500k \
-    --index_file executable_data/gist1m/500k/gist_500k.index \
-    --result_saveprefix executable_data/gist1m/500k/results/results_500k \
-    --M $M
+if [ ${#SKIPS[@]} -gt 0 ]; then
+    echo "- Skipped (${#SKIPS[@]}):"
+    for d in "${SKIPS[@]}"; do echo "    $d"; done
 fi
 
-echo ""
-echo "================================================"
-echo "Searching GIST 750k Index"
-echo "================================================"
-if [ ! -f "executable_data/gist1m/750k/gist_750k.index" ]; then
-    echo "SKIP: index not found, run build_gist_indexes.sh first"
-else
-$SEARCH_EXECUTABLE \
-    --data_path executable_data/gist1m/750k/gist_base_750k.bin \
-    --query_path executable_data/gist1m/750k/gist_query_750k.bin \
-    --range_saveprefix executable_data/gist1m/750k/query_ranges/query_ranges_750k \
-    --groundtruth_saveprefix executable_data/gist1m/750k/groundtruth/groundtruth_750k \
-    --index_file executable_data/gist1m/750k/gist_750k.index \
-    --result_saveprefix executable_data/gist1m/750k/results/results_750k \
-    --M $M
+if [ ${#FAILURES[@]} -gt 0 ]; then
+    echo "✗ FAILED (${#FAILURES[@]}):"
+    for d in "${FAILURES[@]}"; do echo "    $d"; done
+    echo ""
+    echo "Check the log above for each failure — exit code and elapsed time are printed."
+    exit 1
 fi
-
-echo ""
-echo "================================================"
-echo "Searching GIST 1000k Index"
-echo "================================================"
-if [ ! -f "executable_data/gist1m/1000k/gist_1000k.index" ]; then
-    echo "SKIP: index not found, run build_gist_indexes.sh first"
-else
-$SEARCH_EXECUTABLE \
-    --data_path executable_data/gist1m/1000k/gist_base_1000k.bin \
-    --query_path executable_data/gist1m/1000k/gist_query_1000k.bin \
-    --range_saveprefix executable_data/gist1m/1000k/query_ranges/query_ranges_1000k \
-    --groundtruth_saveprefix executable_data/gist1m/1000k/groundtruth/groundtruth_1000k \
-    --index_file executable_data/gist1m/1000k/gist_1000k.index \
-    --result_saveprefix executable_data/gist1m/1000k/results/results_1000k \
-    --M $M
-fi
-
-echo ""
-echo "================================================"
-echo "Searching Video 1m (YouTube RGB) Index"
-echo "================================================"
-if [ ! -f "executable_data/video/1m/youtube_rgb_1m.index" ]; then
-    echo "SKIP: index not found at executable_data/video/1m/youtube_rgb_1m.index"
-else
-$SEARCH_EXECUTABLE \
-    --data_path executable_data/video/1m/youtube_rgb_1m.bin \
-    --query_path executable_data/video/1m/youtube_rgb_query.bin \
-    --range_saveprefix executable_data/video/1m/query_ranges/qr \
-    --groundtruth_saveprefix executable_data/video/1m/groundtruth/gt \
-    --index_file executable_data/video/1m/youtube_rgb_1m.index \
-    --result_saveprefix executable_data/video/1m/results/results \
-    --M $M
-fi
-
-echo ""
-echo "================================================"
-echo "Searching Audi 1m Index"
-echo "================================================"
-if [ ! -f "executable_data/audi/1m/yt_aud_1m.index" ]; then
-    echo "SKIP: index not found at executable_data/audi/1m/yt_aud_1m.index"
-else
-$SEARCH_EXECUTABLE \
-    --data_path executable_data/audi/1m/yt_aud_1m.bin \
-    --query_path executable_data/audi/1m/yt_aud_query.bin \
-    --range_saveprefix executable_data/audi/1m/query_ranges/qr \
-    --groundtruth_saveprefix executable_data/audi/1m/groundtruth/gt \
-    --index_file executable_data/audi/1m/yt_aud_1m.index \
-    --result_saveprefix executable_data/audi/1m/results/res \
-    --M $M
-fi
-
-echo ""
-echo "================================================"
-echo "Search Tests Complete!"
-echo "================================================"
-echo "Results saved in:"
-echo "  - executable_data/gist1m/250k/results/results_250k*.csv"
-echo "  - executable_data/gist1m/500k/results/results_500k*.csv"
-echo "  - executable_data/gist1m/750k/results/results_750k*.csv"
-echo "  - executable_data/gist1m/1000k/results/results_1000k*.csv"
-echo "  - executable_data/video/results/results*.csv"
-echo "  - executable_data/audi/results/results*.csv"
-echo "================================================"

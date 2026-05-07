@@ -89,23 +89,32 @@ echo "" | tee -a "$LOG_FILE"
 DATASETS_TO_PROCESS=()
 
 if [ $# -eq 0 ] || [ "$1" == "all" ]; then
-    # Process all datasets
-    DATASETS_TO_PROCESS=("gist1m:250k" "gist1m:500k" "gist1m:750k" "gist1m:1000k" "audi" "video")
+    DATASETS_TO_PROCESS=(
+        "gist1m:250k" "gist1m:500k" "gist1m:750k" "gist1m:1000k"
+        "video:1m" "video:2m" "video:4m" "video:8m"
+        "audi:1m"  "audi:2m"  "audi:4m"  "audi:8m"
+    )
 elif [ "$1" == "gist1m" ]; then
     if [ $# -eq 1 ]; then
-        # All gist1m sizes
         DATASETS_TO_PROCESS=("gist1m:250k" "gist1m:500k" "gist1m:750k" "gist1m:1000k")
     else
-        # Specific size
         DATASETS_TO_PROCESS=("gist1m:$2")
     fi
-elif [ "$1" == "audi" ]; then
-    DATASETS_TO_PROCESS=("audi")
 elif [ "$1" == "video" ]; then
-    DATASETS_TO_PROCESS=("video")
+    if [ $# -eq 1 ]; then
+        DATASETS_TO_PROCESS=("video:1m" "video:2m" "video:4m" "video:8m")
+    else
+        DATASETS_TO_PROCESS=("video:$2")
+    fi
+elif [ "$1" == "audi" ]; then
+    if [ $# -eq 1 ]; then
+        DATASETS_TO_PROCESS=("audi:1m" "audi:2m" "audi:4m" "audi:8m")
+    else
+        DATASETS_TO_PROCESS=("audi:$2")
+    fi
 else
     log_error "Unknown dataset: $1"
-    echo "Usage: $0 [all|gist1m [size]|audi|video]" | tee -a "$LOG_FILE"
+    echo "Usage: $0 [all|gist1m [size]|video [size]|audi [size]]" | tee -a "$LOG_FILE"
     exit 1
 fi
 
@@ -113,100 +122,88 @@ fi
 # PROCESS DATASETS
 # ============================================================================
 
-for dataset_spec in "${DATASETS_TO_PROCESS[@]}"; do
-    IFS=':' read -r dataset_name dataset_size <<< "$dataset_spec"
-    
-    # Set parameters based on dataset
+compress_dataset() {
+    local dataset_name="$1"
+    local dataset_size="$2"
+    local vec_dim M nbits vector_file dataset_path model_prefix display_name
+
     case "$dataset_name" in
         gist1m)
-            vec_dim=960
-            M=320
-            nbits=9
+            vec_dim=960; M=320; nbits=9
             vector_file="gist_base_${dataset_size}.bin"
             dataset_path="$DATA_ROOT/gist1m/$dataset_size"
             model_prefix="gist_${dataset_size}_pq"
             display_name="gist1m/$dataset_size"
             ;;
-        audi)
-            vec_dim=128
-            M=32
-            nbits=9
-            vector_file="yt_aud_sorted_vec_by_attr.bin"
-            dataset_path="$DATA_ROOT/audi"
-            model_prefix="audi_pq"
-            display_name="audi"
-            ;;
         video)
-            vec_dim=1024
-            M=256
-            nbits=9
-            vector_file="youtube_rgb_sorted.bin"
-            dataset_path="$DATA_ROOT/video"
-            model_prefix="video_pq"
-            display_name="video"
+            vec_dim=1024; M=256; nbits=9
+            vector_file="youtube_rgb_${dataset_size}.bin"
+            dataset_path="$DATA_ROOT/video/$dataset_size"
+            model_prefix="video_${dataset_size}_pq"
+            display_name="video/$dataset_size"
+            ;;
+        audi)
+            vec_dim=128; M=32; nbits=9
+            vector_file="yt_aud_${dataset_size}.bin"
+            dataset_path="$DATA_ROOT/audi/$dataset_size"
+            model_prefix="audi_${dataset_size}_pq"
+            display_name="audi/$dataset_size"
             ;;
         *)
             log_error "Unknown dataset: $dataset_name"
-            continue
+            return 1
             ;;
     esac
-    
-    # Verify dataset exists
-    if [ ! -d "$dataset_path" ]; then
-        log_error "Dataset not found: $display_name at $dataset_path"
-        continue
-    fi
-    
-    # Verify vector file exists
-    vector_path="$dataset_path/$vector_file"
-    if [ ! -f "$vector_path" ]; then
-        log_error "Vector file not found for $display_name: $vector_file"
-        continue
-    fi
-    
-    # Create PQ folder
-    pq_folder="$dataset_path/pq"
-    mkdir -p "$pq_folder"
-    
-    # Set output paths
-    pq_model="$pq_folder/${model_prefix}_m${M}_nb${nbits}.faiss"
-    pq_codes="$pq_folder/${model_prefix}_codes_m${M}_nb${nbits}.bin"
-    
+
+    local vector_path="$dataset_path/$vector_file"
+    local pq_folder="$dataset_path/pq"
+    local pq_model="$pq_folder/${model_prefix}_m${M}_nb${nbits}.faiss"
+    local pq_codes="$pq_folder/${model_prefix}_codes_m${M}_nb${nbits}.bin"
+
     log_header "Processing: $display_name"
-    log_info "Vector dimension: $vec_dim"
-    log_info "M (subspaces): $M"
-    log_info "nbits: $nbits (2^$nbits = $((2**nbits)) centroids per subspace)"
-    log_info "Total centroids: $((M * (2**nbits)))"
+
+    if [ ! -f "$vector_path" ]; then
+        log_error "Vector file not found: $vector_path — skipping"
+        return 0
+    fi
+
+    if [ -f "$pq_model" ] && [ -f "$pq_codes" ]; then
+        log_info "Already trained — skipping (delete files to retrain)"
+        log_info "  $pq_model"
+        log_info "  $pq_codes"
+        echo "" | tee -a "$LOG_FILE"
+        return 0
+    fi
+
+    mkdir -p "$pq_folder"
+
+    log_info "dim=$vec_dim  M=$M  nbits=$nbits  ($(( M * (2**nbits) )) total centroids)"
+    log_info "Input:  $vector_path"
+    log_info "Output: $(basename "$pq_model"), $(basename "$pq_codes")"
     echo "" | tee -a "$LOG_FILE"
-    
-    log_info "Input: $vector_file"
-    log_info "Output model: $(basename "$pq_model")"
-    log_info "Output codes: $(basename "$pq_codes")"
-    echo "" | tee -a "$LOG_FILE"
-    
-    # Run PQ compression
-    log_info "Starting compression..."
+
     if "$PQ_COMPRESS" \
         --data "$vector_path" \
         --model_out "$pq_model" \
         --codes_out "$pq_codes" \
         --M "$M" \
         --nbits "$nbits" 2>&1 | tee -a "$LOG_FILE"; then
-        
-        log_success "Compression completed for $display_name"
-        
-        # Verify output files exist
+
         if [ -f "$pq_model" ] && [ -f "$pq_codes" ]; then
-            model_size=$(du -h "$pq_model" | cut -f1)
-            codes_size=$(du -h "$pq_codes" | cut -f1)
-            log_info "✓ Model file: $model_size"
-            log_info "✓ Codes file: $codes_size"
+            log_success "Done: $(du -h "$pq_model" | cut -f1) model, $(du -h "$pq_codes" | cut -f1) codes"
+        else
+            log_error "Binary exited 0 but output files missing"
         fi
     else
         log_error "Compression failed for $display_name"
     fi
-    
+
     echo "" | tee -a "$LOG_FILE"
+}
+
+for dataset_spec in "${DATASETS_TO_PROCESS[@]}"; do
+    IFS=':' read -r dataset_name dataset_size <<< "$dataset_spec"
+    compress_dataset "$dataset_name" "$dataset_size"
 done
 
 # ============================================================================
