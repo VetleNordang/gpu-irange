@@ -166,7 +166,8 @@ __global__ void irange_search_kernel_pq(
                                    gpu_index.d_size_data_per_element,
                                    size_links_per_layer,
                                    visited, query_id,
-                                   s_edges[warp_in_blk], &s_num_edges[warp_in_blk]);
+                                   s_edges[warp_in_blk], &s_num_edges[warp_in_blk],
+                                   lane_id);
                 }
             }
         }

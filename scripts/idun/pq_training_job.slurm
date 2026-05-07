@@ -29,6 +29,7 @@ mkdir -p logs
 module purge
 module load GCCcore/11.3.0
 module load CUDA/12.1.1
+module load CMake/3.23.1-GCCcore-11.3.0
 
 CONDA_FAISS=/cluster/home/vetlean/.conda/envs/irange
 export LD_LIBRARY_PATH="$CONDA_FAISS/lib:$LD_LIBRARY_PATH"

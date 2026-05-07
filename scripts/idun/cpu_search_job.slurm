@@ -9,7 +9,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=64G
+#SBATCH --mem=128G
 #SBATCH --job-name="irange_cpu_search"
 #SBATCH --output=logs/cpu_search_%j.log
 #SBATCH --mail-user=nordang.vetle@gmail.com

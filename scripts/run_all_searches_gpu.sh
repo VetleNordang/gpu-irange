@@ -3,7 +3,7 @@
 # Script to run GPU searches on all built indexes
 # Continues to next dataset even if one fails
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR" || exit 1
 
 echo "================================================"
