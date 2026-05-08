@@ -15,6 +15,10 @@ M=32
 GPU_EXECUTABLE="$SCRIPT_DIR/cude_version/build/optimized_test"
 PLOT_SCRIPT="$SCRIPT_DIR/python/plots/plot_gpu_vs_cpu.py"
 
+# Auto-tag plots when running inside a SLURM job on IDUN
+PLOT_ENV_ARG=""
+[ -n "${SLURM_JOB_ID:-}" ] && PLOT_ENV_ARG="--env idun"
+
 # Check if GPU executable exists
 if [ ! -f "$GPU_EXECUTABLE" ]; then
     echo "Optimized GPU executable not found at $GPU_EXECUTABLE"
@@ -98,7 +102,7 @@ run_gpu_search() {
 
     echo "Running plots after: $dataset_name"
     if [ -f "$PLOT_SCRIPT" ]; then
-        if "${CONDA_PYTHON:-python3}" "$PLOT_SCRIPT" --dataset "$plot_dataset_key"; then
+        if "${CONDA_PYTHON:-python3}" "$PLOT_SCRIPT" --dataset "$plot_dataset_key" ${PLOT_ENV_ARG}; then
             echo "✓ Plot generation completed"
         else
             echo "✗ Plot generation failed (continuing to next dataset)"
@@ -116,7 +120,7 @@ for size in 1m 2m 4m 8m; do
     if [ -f "executable_data/video/${size}/youtube_rgb_${size}.index" ]; then
         run_gpu_search "Video ${size} (YouTube RGB)" \
             "executable_data/video/${size}/results/gpu_normal/results_gpu" \
-            "video" \
+            "video_${size}" \
             --data_path  executable_data/video/${size}/youtube_rgb_${size}.bin \
             --query_path executable_data/video/${size}/youtube_rgb_query.bin \
             --range_saveprefix       executable_data/video/${size}/query_ranges/qr \
@@ -190,7 +194,7 @@ for size in 1m 2m 4m 8m; do
     if [ -f "executable_data/audi/${size}/yt_aud_${size}.index" ]; then
         run_gpu_search "Audi ${size}" \
             "executable_data/audi/${size}/results/gpu_normal/results_gpu" \
-            "audi" \
+            "audi_${size}" \
             --data_path executable_data/audi/${size}/yt_aud_${size}.bin \
             --query_path executable_data/audi/${size}/yt_aud_query.bin \
             --range_saveprefix executable_data/audi/${size}/query_ranges/qr \
