@@ -35,6 +35,9 @@ declare -a FAILURES=()
 run_gpu_search() {
     local dataset_name="$1"
     local result_prefix="$2"
+    local results_dir
+    results_dir="$(dirname "$(dirname "${result_prefix}")")"
+    mkdir -p "${results_dir}/cpu_normal" "${results_dir}/gpu_normal" "${results_dir}/gpu_pq" "${results_dir}/analysis"
     local plot_dataset_key="$3"
     shift
     shift
@@ -112,14 +115,14 @@ run_gpu_search() {
 for size in 1m 2m 4m 8m; do
     if [ -f "executable_data/video/${size}/youtube_rgb_${size}.index" ]; then
         run_gpu_search "Video ${size} (YouTube RGB)" \
-            "executable_data/video/${size}/results/results_gpu" \
+            "executable_data/video/${size}/results/gpu_normal/results_gpu" \
             "video" \
             --data_path  executable_data/video/${size}/youtube_rgb_${size}.bin \
             --query_path executable_data/video/${size}/youtube_rgb_query.bin \
             --range_saveprefix       executable_data/video/${size}/query_ranges/qr \
             --groundtruth_saveprefix executable_data/video/${size}/groundtruth/gt \
             --index_file             executable_data/video/${size}/youtube_rgb_${size}.index \
-            --result_saveprefix      executable_data/video/${size}/results/results_gpu
+            --result_saveprefix      executable_data/video/${size}/results/gpu_normal/results_gpu
     else
         echo "SKIP: Video ${size} — index not found"
     fi
@@ -129,55 +132,55 @@ done
 # GIST 250k Index
 # ============================================
 run_gpu_search "GIST 250k" \
-    "executable_data/gist1m/250k/results/results_250k_gpu" \
+    "executable_data/gist1m/250k/results/gpu_normal/results_250k_gpu" \
     "gist250k" \
     --data_path executable_data/gist1m/250k/gist_base_250k.bin \
     --query_path executable_data/gist1m/250k/gist_query_250k.bin \
     --range_saveprefix executable_data/gist1m/250k/query_ranges/query_ranges_250k \
     --groundtruth_saveprefix executable_data/gist1m/250k/groundtruth/groundtruth_250k \
     --index_file executable_data/gist1m/250k/gist_250k.index \
-    --result_saveprefix executable_data/gist1m/250k/results/results_250k_gpu
+    --result_saveprefix executable_data/gist1m/250k/results/gpu_normal/results_250k_gpu
 
 # ============================================
 # GIST 500k Index
 # ============================================
 run_gpu_search "GIST 500k" \
-    "executable_data/gist1m/500k/results/results_500k_gpu" \
+    "executable_data/gist1m/500k/results/gpu_normal/results_500k_gpu" \
     "gist500k" \
     --data_path executable_data/gist1m/500k/gist_base_500k.bin \
     --query_path executable_data/gist1m/500k/gist_query_500k.bin \
     --range_saveprefix executable_data/gist1m/500k/query_ranges/query_ranges_500k \
     --groundtruth_saveprefix executable_data/gist1m/500k/groundtruth/groundtruth_500k \
     --index_file executable_data/gist1m/500k/gist_500k.index \
-    --result_saveprefix executable_data/gist1m/500k/results/results_500k_gpu
+    --result_saveprefix executable_data/gist1m/500k/results/gpu_normal/results_500k_gpu
 
 
 # ============================================
 # GIST 750k Index
 # ============================================
 run_gpu_search "GIST 750k" \
-    "executable_data/gist1m/750k/results/results_750k_gpu" \
+    "executable_data/gist1m/750k/results/gpu_normal/results_750k_gpu" \
     "gist750k" \
     --data_path executable_data/gist1m/750k/gist_base_750k.bin \
     --query_path executable_data/gist1m/750k/gist_query_750k.bin \
     --range_saveprefix executable_data/gist1m/750k/query_ranges/query_ranges_750k \
     --groundtruth_saveprefix executable_data/gist1m/750k/groundtruth/groundtruth_750k \
     --index_file executable_data/gist1m/750k/gist_750k.index \
-    --result_saveprefix executable_data/gist1m/750k/results/results_750k_gpu
+    --result_saveprefix executable_data/gist1m/750k/results/gpu_normal/results_750k_gpu
 
 
 # ============================================
 # GIST 1000k Index
 # ============================================
 run_gpu_search "GIST 1000k" \
-    "executable_data/gist1m/1000k/results/results_1000k_gpu" \
+    "executable_data/gist1m/1000k/results/gpu_normal/results_1000k_gpu" \
     "gist1000k" \
     --data_path executable_data/gist1m/1000k/gist_base_1000k.bin \
     --query_path executable_data/gist1m/1000k/gist_query_1000k.bin \
     --range_saveprefix executable_data/gist1m/1000k/query_ranges/query_ranges_1000k \
     --groundtruth_saveprefix executable_data/gist1m/1000k/groundtruth/groundtruth_1000k \
     --index_file executable_data/gist1m/1000k/gist_1000k.index \
-    --result_saveprefix executable_data/gist1m/1000k/results/results_1000k_gpu
+    --result_saveprefix executable_data/gist1m/1000k/results/gpu_normal/results_1000k_gpu
 
 
 # ============================================
@@ -186,14 +189,14 @@ run_gpu_search "GIST 1000k" \
 for size in 1m 2m 4m 8m; do
     if [ -f "executable_data/audi/${size}/yt_aud_${size}.index" ]; then
         run_gpu_search "Audi ${size}" \
-            "executable_data/audi/${size}/results/results_gpu" \
+            "executable_data/audi/${size}/results/gpu_normal/results_gpu" \
             "audi" \
             --data_path executable_data/audi/${size}/yt_aud_${size}.bin \
             --query_path executable_data/audi/${size}/yt_aud_query.bin \
             --range_saveprefix executable_data/audi/${size}/query_ranges/qr \
             --groundtruth_saveprefix executable_data/audi/${size}/groundtruth/gt \
             --index_file executable_data/audi/${size}/yt_aud_${size}.index \
-            --result_saveprefix executable_data/audi/${size}/results/results_gpu
+            --result_saveprefix executable_data/audi/${size}/results/gpu_normal/results_gpu
     else
         echo "SKIP: Audi ${size} — index not found"
     fi
@@ -225,9 +228,9 @@ if [ ${#FAILURES[@]} -gt 0 ]; then
 fi
 
 echo "GPU Results saved in:"
-echo "  - executable_data/gist1m/{250k,500k,750k,1000k}/results/results_*_gpu*.csv"
-echo "  - executable_data/video/{1m,2m,4m,8m}/results/results_gpu*.csv"
-echo "  - executable_data/audi/{1m,2m,4m,8m}/results/results_gpu*.csv"
+echo "  - executable_data/gist1m/{250k,500k,750k,1000k}/results/gpu_normal/results_*_gpu*.csv"
+echo "  - executable_data/video/{1m,2m,4m,8m}/results/gpu_normal/results_gpu*.csv"
+echo "  - executable_data/audi/{1m,2m,4m,8m}/results/gpu_normal/results_gpu*.csv"
 echo "================================================"
 
 # Exit with error if any dataset failed

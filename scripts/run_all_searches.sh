@@ -50,6 +50,10 @@ run_cpu_search() {
 
 # ── GIST ──────────────────────────────────────────────────────────────────────
 for size in 250k 500k 750k 1000k; do
+    mkdir -p "executable_data/gist1m/${size}/results/cpu_normal" \
+             "executable_data/gist1m/${size}/results/gpu_normal" \
+             "executable_data/gist1m/${size}/results/gpu_pq" \
+             "executable_data/gist1m/${size}/results/analysis"
     run_cpu_search "GIST ${size}" \
         "executable_data/gist1m/${size}/gist_${size}.index" \
         --data_path              executable_data/gist1m/${size}/gist_base_${size}.bin \
@@ -57,11 +61,15 @@ for size in 250k 500k 750k 1000k; do
         --range_saveprefix       executable_data/gist1m/${size}/query_ranges/query_ranges_${size} \
         --groundtruth_saveprefix executable_data/gist1m/${size}/groundtruth/groundtruth_${size} \
         --index_file             executable_data/gist1m/${size}/gist_${size}.index \
-        --result_saveprefix      executable_data/gist1m/${size}/results/results_${size}
+        --result_saveprefix      executable_data/gist1m/${size}/results/cpu_normal/results_${size}
 done
 
 # ── Video ─────────────────────────────────────────────────────────────────────
 for size in 1m 2m 4m 8m; do
+    mkdir -p "executable_data/video/${size}/results/cpu_normal" \
+             "executable_data/video/${size}/results/gpu_normal" \
+             "executable_data/video/${size}/results/gpu_pq" \
+             "executable_data/video/${size}/results/analysis"
     run_cpu_search "Video ${size} (YouTube RGB)" \
         "executable_data/video/${size}/youtube_rgb_${size}.index" \
         --data_path              executable_data/video/${size}/youtube_rgb_${size}.bin \
@@ -69,11 +77,15 @@ for size in 1m 2m 4m 8m; do
         --range_saveprefix       executable_data/video/${size}/query_ranges/qr \
         --groundtruth_saveprefix executable_data/video/${size}/groundtruth/gt \
         --index_file             executable_data/video/${size}/youtube_rgb_${size}.index \
-        --result_saveprefix      executable_data/video/${size}/results/results
+        --result_saveprefix      executable_data/video/${size}/results/cpu_normal/results
 done
 
 # ── Audi ──────────────────────────────────────────────────────────────────────
 for size in 1m 2m 4m 8m; do
+    mkdir -p "executable_data/audi/${size}/results/cpu_normal" \
+             "executable_data/audi/${size}/results/gpu_normal" \
+             "executable_data/audi/${size}/results/gpu_pq" \
+             "executable_data/audi/${size}/results/analysis"
     run_cpu_search "Audi ${size}" \
         "executable_data/audi/${size}/yt_aud_${size}.index" \
         --data_path              executable_data/audi/${size}/yt_aud_${size}.bin \
@@ -81,7 +93,7 @@ for size in 1m 2m 4m 8m; do
         --range_saveprefix       executable_data/audi/${size}/query_ranges/qr \
         --groundtruth_saveprefix executable_data/audi/${size}/groundtruth/gt \
         --index_file             executable_data/audi/${size}/yt_aud_${size}.index \
-        --result_saveprefix      executable_data/audi/${size}/results/results
+        --result_saveprefix      executable_data/audi/${size}/results/cpu_normal/results
 done
 
 # ── Summary ───────────────────────────────────────────────────────────────────

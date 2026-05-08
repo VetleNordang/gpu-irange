@@ -33,6 +33,9 @@ declare -a SKIPS=()
 run_pq_search() {
     local dataset_name="$1"
     local result_prefix="$2"
+    local results_dir
+    results_dir="$(dirname "$(dirname "${result_prefix}")")"
+    mkdir -p "${results_dir}/cpu_normal" "${results_dir}/gpu_normal" "${results_dir}/gpu_pq" "${results_dir}/analysis"
     local pq_model="$3"
     local pq_codes="$4"
     shift 4
@@ -97,7 +100,7 @@ for size in 250k 500k 750k 1000k; do
     fi
     mkdir -p "executable_data/gist1m/${size}/pq"
     run_pq_search "GIST ${size}" \
-        "executable_data/gist1m/${size}/results/results_${size}_pq" \
+        "executable_data/gist1m/${size}/results/gpu_pq/results_${size}_pq" \
         "executable_data/gist1m/${size}/pq/gist_${size}_pq_m320_nb9.faiss" \
         "executable_data/gist1m/${size}/pq/gist_${size}_pq_codes_m320_nb9.bin" \
         --data_path_comp executable_data/gist1m/${size}/gist_base_${size}.bin \
@@ -105,7 +108,7 @@ for size in 250k 500k 750k 1000k; do
         --index_path     executable_data/gist1m/${size}/gist_${size}.index \
         --range_saveprefix       executable_data/gist1m/${size}/query_ranges/query_ranges_${size} \
         --groundtruth_saveprefix executable_data/gist1m/${size}/groundtruth/groundtruth_${size} \
-        --result_saveprefix      executable_data/gist1m/${size}/results/results_${size}_pq \
+        --result_saveprefix      executable_data/gist1m/${size}/results/gpu_pq/results_${size}_pq \
         --pq_model_out   executable_data/gist1m/${size}/pq/gist_${size}_pq_m320_nb9.faiss \
         --pq_codes_out   executable_data/gist1m/${size}/pq/gist_${size}_pq_codes_m320_nb9.bin \
         --M_compression_spaces 320 \
@@ -122,7 +125,7 @@ for size in 1m 2m 4m 8m; do
     fi
     mkdir -p "executable_data/video/${size}/pq"
     run_pq_search "Video ${size} (YouTube RGB)" \
-        "executable_data/video/${size}/results/results_pq" \
+        "executable_data/video/${size}/results/gpu_pq/results_pq" \
         "executable_data/video/${size}/pq/video_${size}_pq_m256_nb9.faiss" \
         "executable_data/video/${size}/pq/video_${size}_pq_codes_m256_nb9.bin" \
         --data_path_comp executable_data/video/${size}/youtube_rgb_${size}.bin \
@@ -130,7 +133,7 @@ for size in 1m 2m 4m 8m; do
         --index_path     executable_data/video/${size}/youtube_rgb_${size}.index \
         --range_saveprefix       executable_data/video/${size}/query_ranges/qr \
         --groundtruth_saveprefix executable_data/video/${size}/groundtruth/gt \
-        --result_saveprefix      executable_data/video/${size}/results/results_pq \
+        --result_saveprefix      executable_data/video/${size}/results/gpu_pq/results_pq \
         --pq_model_out   executable_data/video/${size}/pq/video_${size}_pq_m256_nb9.faiss \
         --pq_codes_out   executable_data/video/${size}/pq/video_${size}_pq_codes_m256_nb9.bin \
         --M_compression_spaces 256 \
@@ -147,7 +150,7 @@ for size in 1m 2m 4m 8m; do
     fi
     mkdir -p "executable_data/audi/${size}/pq"
     run_pq_search "Audi ${size}" \
-        "executable_data/audi/${size}/results/results_pq" \
+        "executable_data/audi/${size}/results/gpu_pq/results_pq" \
         "executable_data/audi/${size}/pq/audi_${size}_pq_m32_nb9.faiss" \
         "executable_data/audi/${size}/pq/audi_${size}_pq_codes_m32_nb9.bin" \
         --data_path_comp executable_data/audi/${size}/yt_aud_${size}.bin \
@@ -155,7 +158,7 @@ for size in 1m 2m 4m 8m; do
         --index_path     executable_data/audi/${size}/yt_aud_${size}.index \
         --range_saveprefix       executable_data/audi/${size}/query_ranges/qr \
         --groundtruth_saveprefix executable_data/audi/${size}/groundtruth/gt \
-        --result_saveprefix      executable_data/audi/${size}/results/results_pq \
+        --result_saveprefix      executable_data/audi/${size}/results/gpu_pq/results_pq \
         --pq_model_out   executable_data/audi/${size}/pq/audi_${size}_pq_m32_nb9.faiss \
         --pq_codes_out   executable_data/audi/${size}/pq/audi_${size}_pq_codes_m32_nb9.bin \
         --M_compression_spaces 32 \
@@ -191,8 +194,8 @@ fi
 
 echo "GPU PQ Results saved in:"
 echo "  - executable_data/gist1m/{250k,500k,750k,1000k}/results/results_*_pq*.csv"
-echo "  - executable_data/video/{1m,2m,4m,8m}/results/results_pq*.csv"
-echo "  - executable_data/audi/{1m,2m,4m,8m}/results/results_pq*.csv"
+echo "  - executable_data/video/{1m,2m,4m,8m}/results/gpu_pq/results_pq*.csv"
+echo "  - executable_data/audi/{1m,2m,4m,8m}/results/gpu_pq/results_pq*.csv"
 echo "================================================"
 
 if [ ${#FAILURES[@]} -gt 0 ]; then
