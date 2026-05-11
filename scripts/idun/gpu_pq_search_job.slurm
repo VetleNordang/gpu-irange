@@ -66,7 +66,7 @@ echo ""
 echo "Running GPU PQ searches..."
 echo "=========================================="
 
-bash scripts/run_all_searches_gpu_pq.sh
+bash scripts/run_searches.sh --mode gpu_pq
 
 echo "=========================================="
 echo "GPU PQ Search completed: $(date)"

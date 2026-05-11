@@ -48,7 +48,13 @@ if [ ! -f "build/tests/search" ]; then
     echo "Build complete."
 fi
 
-bash scripts/run_all_searches.sh
+# NOTE: running serial then parallel roughly doubles wall time vs. the old
+# single-mode run — increase --time above if jobs time out on large datasets.
+echo "--- serial run ---"
+bash scripts/run_searches.sh --mode cpu_serial   --datasets gist250k gist500k gist750k gist1000k
+
+echo "--- parallel run ---"
+bash scripts/run_searches.sh --mode cpu_parallel --datasets gist250k gist500k gist750k gist1000k
 
 echo "=========================================="
 echo "CPU Search completed: $(date)"

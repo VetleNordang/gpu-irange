@@ -70,7 +70,7 @@ echo ""
 echo "Running GPU searches..."
 echo "=========================================="
 
-bash scripts/run_all_searches_gpu.sh
+bash scripts/run_searches.sh --mode gpu_normal
 
 echo "=========================================="
 echo "GPU Search completed: $(date)"
