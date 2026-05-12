@@ -18,14 +18,12 @@
 #SBATCH --mail-user=nordang.vetle@gmail.com
 #SBATCH --mail-type=END,FAIL
 
-echo "=========================================="
-echo "GPU Search started: $(date)"
-echo "Job ID: $SLURM_JOB_ID"
-echo "Node:   $(hostname)"
-echo "=========================================="
-
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p logs
+
+source scripts/idun/log_sysinfo.sh
+echo "GPU Search started: $(date)"
+log_gpu_sysinfo
 
 module purge
 module load GCCcore/11.3.0
@@ -40,9 +38,6 @@ export LD_LIBRARY_PATH="$CONDA_FAISS/lib:$LD_LIBRARY_PATH"
 # Use the conda env's Python so pandas/matplotlib are available for plots
 export PATH="$CONDA_FAISS/bin:$PATH"
 export CONDA_PYTHON="$CONDA_FAISS/bin/python3"
-
-echo "GPU info:"
-nvidia-smi --query-gpu=name,memory.free,memory.total --format=csv,noheader
 
 FREE_MIB=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader | head -1 | tr -d ' MiB')
 if [ "${FREE_MIB:-0}" -lt 10000 ]; then

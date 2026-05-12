@@ -15,15 +15,12 @@
 #SBATCH --mail-user=nordang.vetle@gmail.com
 #SBATCH --mail-type=END,FAIL
 
-echo "=========================================="
-echo "GIST Index Build started: $(date)"
-echo "Job ID: $SLURM_JOB_ID"
-echo "Node:   $(hostname)"
-echo "Cores:  $SLURM_CPUS_PER_TASK"
-echo "=========================================="
-
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p logs
+
+source scripts/idun/log_sysinfo.sh
+echo "GIST Index Build started: $(date)"
+log_cpu_sysinfo
 
 module purge
 module load GCCcore/11.3.0
