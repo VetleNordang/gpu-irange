@@ -1,12 +1,16 @@
 #!/bin/bash
 # Unified search runner for all modes and datasets.
-# Usage: run_searches.sh --mode <mode> [--datasets <key>...]
+# Usage: run_searches.sh --mode <mode> [--datasets <key>...] [--runs N]
 #
 # Modes:
-#   cpu_serial    OMP_NUM_THREADS=1,    results → cpu_serial/
+#   cpu_serial    OMP_NUM_THREADS=1,     results → cpu_serial/
 #   cpu_parallel  OMP_NUM_THREADS=nproc, results → cpu_parallel/
 #   gpu_normal    GPU binary,            results → gpu_normal/
 #   gpu_pq        GPU PQ binary,         results → gpu_pq/
+#
+# Runs (default 7):
+#   --runs 7   1 warmup + 6 real runs → {mode}/warmup/, {mode}/run1/ … run6/
+#   --runs 1   single run, no warmup  → {mode}/  (backwards-compatible)
 #
 # Dataset keys:
 #   gist250k  gist500k  gist750k  gist1000k
@@ -21,11 +25,14 @@ cd "$PROJECT_ROOT"
 # ── Argument parsing ───────────────────────────────────────────────────────────
 MODE=""
 DATASETS=()
+NUM_RUNS=7
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --mode)
             MODE="$2"; shift 2 ;;
+        --runs)
+            NUM_RUNS="$2"; shift 2 ;;
         --datasets)
             shift
             while [[ $# -gt 0 && "$1" != --* ]]; do
@@ -34,14 +41,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown argument: $1"
-            echo "Usage: $0 --mode <cpu_serial|cpu_parallel|gpu_normal|gpu_pq> [--datasets ...]"
+            echo "Usage: $0 --mode <cpu_serial|cpu_parallel|gpu_normal|gpu_pq> [--datasets ...] [--runs N]"
             exit 1
             ;;
     esac
 done
 
 if [[ -z "$MODE" ]]; then
-    echo "Usage: $0 --mode <cpu_serial|cpu_parallel|gpu_normal|gpu_pq> [--datasets ...]"
+    echo "Usage: $0 --mode <cpu_serial|cpu_parallel|gpu_normal|gpu_pq> [--datasets ...] [--runs N]"
     exit 1
 fi
 
@@ -170,23 +177,45 @@ run_cpu() {
         return
     fi
 
-    local out_dir="$D_RESULTS_BASE/$RESULT_DIR"
-    mkdir -p "$out_dir"
-    local prefix="$out_dir/$D_CPU_PREFIX"
+    local base_dir="$D_RESULTS_BASE/$RESULT_DIR"
+    local any_failed=0
     local t_start=$SECONDS
 
-    if OMP_NUM_THREADS="$CPU_THREADS" "$CPU_SEARCH_BIN" \
-            --data_path              "$D_DATA"  \
-            --query_path             "$D_QUERY" \
-            --index_file             "$D_INDEX" \
-            --range_saveprefix       "$D_RANGE" \
-            --groundtruth_saveprefix "$D_GT"    \
-            --result_saveprefix      "$prefix"  \
-            --M "$GRAPH_M"; then
-        echo "✓ $key done ($(( SECONDS - t_start ))s) → ${prefix}*.csv"
+    for (( run=0; run<NUM_RUNS; run++ )); do
+        local run_dir run_label
+        if [[ $NUM_RUNS -eq 1 ]]; then
+            run_dir="$base_dir"
+            run_label="run"
+        elif [[ $run -eq 0 ]]; then
+            run_dir="$base_dir/warmup"
+            run_label="warmup"
+        else
+            run_dir="$base_dir/run$run"
+            run_label="run$run"
+        fi
+
+        mkdir -p "$run_dir"
+        local prefix="$run_dir/$D_CPU_PREFIX"
+        echo "  [$run_label] → $prefix"
+
+        if ! OMP_NUM_THREADS="$CPU_THREADS" "$CPU_SEARCH_BIN" \
+                --data_path              "$D_DATA"  \
+                --query_path             "$D_QUERY" \
+                --index_file             "$D_INDEX" \
+                --range_saveprefix       "$D_RANGE" \
+                --groundtruth_saveprefix "$D_GT"    \
+                --result_saveprefix      "$prefix"  \
+                --M "$GRAPH_M"; then
+            echo "  ✗ $run_label FAILED"
+            any_failed=1
+        fi
+    done
+
+    if [[ $any_failed -eq 0 ]]; then
+        echo "✓ $key done ($(( SECONDS - t_start ))s)"
         SUCCESSES+=("$key")
     else
-        echo "✗ $key FAILED ($(( SECONDS - t_start ))s)"
+        echo "✗ $key had failures ($(( SECONDS - t_start ))s)"
         FAILURES+=("$key")
     fi
 }
@@ -205,31 +234,53 @@ run_gpu_normal() {
         return
     fi
 
-    local out_dir="$D_RESULTS_BASE/$RESULT_DIR"
-    mkdir -p "$out_dir"
-    local prefix="$out_dir/$D_GPU_PREFIX"
-    local log_file; log_file=$(mktemp)
+    local base_dir="$D_RESULTS_BASE/$RESULT_DIR"
+    local any_failed=0
     local t_start=$SECONDS
 
     nvidia-smi --query-gpu=name,memory.free,memory.used,memory.total --format=csv,noheader 2>/dev/null || true
 
-    timeout 3600 "$GPU_SEARCH_BIN" \
-            --data_path              "$D_DATA"  \
-            --query_path             "$D_QUERY" \
-            --index_file             "$D_INDEX" \
-            --range_saveprefix       "$D_RANGE" \
-            --groundtruth_saveprefix "$D_GT"    \
-            --result_saveprefix      "$prefix"  \
-            --M "$GRAPH_M" 2>&1 | tee "$log_file"
-    local exit_code=${PIPESTATUS[0]}
+    for (( run=0; run<NUM_RUNS; run++ )); do
+        local run_dir run_label
+        if [[ $NUM_RUNS -eq 1 ]]; then
+            run_dir="$base_dir"
+            run_label="run"
+        elif [[ $run -eq 0 ]]; then
+            run_dir="$base_dir/warmup"
+            run_label="warmup"
+        else
+            run_dir="$base_dir/run$run"
+            run_label="run$run"
+        fi
 
-    local failed=0
-    [[ $exit_code -ne 0 ]] && failed=1
-    grep -Eqi "out of memory|error:" "$log_file" && failed=1
-    ls "${prefix}"*.csv >/dev/null 2>&1 || failed=1
-    rm -f "$log_file"
+        mkdir -p "$run_dir"
+        local prefix="$run_dir/$D_GPU_PREFIX"
+        local log_file; log_file=$(mktemp)
+        echo "  [$run_label] → $prefix"
 
-    if [[ $failed -eq 0 ]]; then
+        timeout 3600 "$GPU_SEARCH_BIN" \
+                --data_path              "$D_DATA"  \
+                --query_path             "$D_QUERY" \
+                --index_file             "$D_INDEX" \
+                --range_saveprefix       "$D_RANGE" \
+                --groundtruth_saveprefix "$D_GT"    \
+                --result_saveprefix      "$prefix"  \
+                --M "$GRAPH_M" 2>&1 | tee "$log_file"
+        local exit_code=${PIPESTATUS[0]}
+
+        local failed=0
+        [[ $exit_code -ne 0 ]] && failed=1
+        grep -Eqi "out of memory|error:" "$log_file" && failed=1
+        ls "${prefix}"*.csv >/dev/null 2>&1 || failed=1
+        rm -f "$log_file"
+
+        if [[ $failed -ne 0 ]]; then
+            echo "  ✗ $run_label FAILED"
+            any_failed=1
+        fi
+    done
+
+    if [[ $any_failed -eq 0 ]]; then
         echo "✓ $key done ($(( SECONDS - t_start ))s)"
         SUCCESSES+=("$key")
         local plot_script="$PROJECT_ROOT/python/plots/plot_gpu_vs_cpu.py"
@@ -238,7 +289,7 @@ run_gpu_normal() {
             "${CONDA_PYTHON:-python3}" "$plot_script" --dataset "$key" $plot_env || true
         fi
     else
-        echo "✗ $key FAILED"
+        echo "✗ $key had failures ($(( SECONDS - t_start ))s)"
         FAILURES+=("$key")
     fi
 }
@@ -265,45 +316,74 @@ run_gpu_pq() {
         return
     fi
 
-    local out_dir="$D_RESULTS_BASE/$RESULT_DIR"
-    mkdir -p "$out_dir"
-    local prefix="$out_dir/results_pq"
-    local log_file; log_file=$(mktemp)
+    local base_dir="$D_RESULTS_BASE/$RESULT_DIR"
+    local any_failed=0
     local t_start=$SECONDS
 
     nvidia-smi --query-gpu=name,memory.free,memory.used,memory.total --format=csv,noheader 2>/dev/null || true
 
-    timeout 3600 "$GPU_PQ_BIN" \
-            --data_path_comp         "$D_DATA"     \
-            --query_path             "$D_QUERY"    \
-            --index_path             "$D_INDEX"    \
-            --range_saveprefix       "$D_RANGE"    \
-            --groundtruth_saveprefix "$D_GT"       \
-            --result_saveprefix      "$prefix"     \
-            --pq_model_out           "$D_PQ_MODEL" \
-            --pq_codes_out           "$D_PQ_CODES" \
-            --M_compression_spaces   "$D_PQ_M"     \
-            --graph_M "$GRAPH_M" 2>&1 | tee "$log_file"
-    local exit_code=${PIPESTATUS[0]}
+    for (( run=0; run<NUM_RUNS; run++ )); do
+        local run_dir run_label
+        if [[ $NUM_RUNS -eq 1 ]]; then
+            run_dir="$base_dir"
+            run_label="run"
+        elif [[ $run -eq 0 ]]; then
+            run_dir="$base_dir/warmup"
+            run_label="warmup"
+        else
+            run_dir="$base_dir/run$run"
+            run_label="run$run"
+        fi
 
-    local failed=0
-    [[ $exit_code -ne 0 ]] && failed=1
-    grep -Eqi "out of memory|error:" "$log_file" && failed=1
-    ls "${prefix}"*.csv >/dev/null 2>&1 || failed=1
-    rm -f "$log_file"
+        mkdir -p "$run_dir"
+        local prefix="$run_dir/results_pq"
+        local log_file; log_file=$(mktemp)
+        echo "  [$run_label] → $prefix"
 
-    if [[ $failed -eq 0 ]]; then
+        timeout 3600 "$GPU_PQ_BIN" \
+                --data_path_comp         "$D_DATA"     \
+                --query_path             "$D_QUERY"    \
+                --index_path             "$D_INDEX"    \
+                --range_saveprefix       "$D_RANGE"    \
+                --groundtruth_saveprefix "$D_GT"       \
+                --result_saveprefix      "$prefix"     \
+                --pq_model_out           "$D_PQ_MODEL" \
+                --pq_codes_out           "$D_PQ_CODES" \
+                --M_compression_spaces   "$D_PQ_M"     \
+                --graph_M "$GRAPH_M" 2>&1 | tee "$log_file"
+        local exit_code=${PIPESTATUS[0]}
+
+        local failed=0
+        [[ $exit_code -ne 0 ]] && failed=1
+        grep -Eqi "out of memory|error:" "$log_file" && failed=1
+        ls "${prefix}"*.csv >/dev/null 2>&1 || failed=1
+        rm -f "$log_file"
+
+        if [[ $failed -ne 0 ]]; then
+            echo "  ✗ $run_label FAILED"
+            any_failed=1
+        fi
+    done
+
+    if [[ $any_failed -eq 0 ]]; then
         echo "✓ $key done ($(( SECONDS - t_start ))s)"
         SUCCESSES+=("$key")
     else
-        echo "✗ $key FAILED"
+        echo "✗ $key had failures ($(( SECONDS - t_start ))s)"
         FAILURES+=("$key")
     fi
 }
 
 # ── Main loop ──────────────────────────────────────────────────────────────────
+if [[ $NUM_RUNS -eq 1 ]]; then
+    RUNS_LABEL="1 run (no warmup)"
+else
+    RUNS_LABEL="$NUM_RUNS runs (1 warmup + $(( NUM_RUNS - 1 )) real)"
+fi
+
 echo "========================================"
 echo "mode:     $MODE  (results → $RESULT_DIR/)"
+echo "runs:     $RUNS_LABEL"
 echo "datasets: ${DATASETS[*]}"
 echo "started:  $(date)"
 echo "========================================"

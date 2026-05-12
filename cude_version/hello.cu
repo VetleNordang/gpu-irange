@@ -291,7 +291,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             printf("✗ Failed to open %s — results for suffix %d will not be saved\n", savepath.c_str(), suffix);
         } else {
             outfile << std::fixed << std::setprecision(6);
-            outfile << "SearchEF,Recall,QPS,DCO,HOP\n";
+            outfile << "SearchEF,Recall,QPS,DCO,HOP,VRAM_MB,PeakVRAM_MB\n";
             outfile.flush();
         }
 
@@ -378,6 +378,17 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             int num_blocks = (query_nb + queries_per_block - 1) / queries_per_block;
             
         
+            // Measure peak VRAM: all cudaMalloc allocations are done, timer not yet started
+            size_t vram_free = 0, vram_total = 0;
+            cudaMemGetInfo(&vram_free, &vram_total);
+            size_t vram_used_mb = (vram_total - vram_free) / (1024 * 1024);
+
+            // Add local memory spill (register spill to VRAM, allocated by driver at kernel launch)
+            cudaFuncAttributes kernel_attrs;
+            cudaFuncGetAttributes(&kernel_attrs, irange_search_kernel);
+            size_t lmem_total = (size_t)kernel_attrs.localSizeBytes * threads_per_block * num_blocks;
+            size_t peak_vram_mb = vram_used_mb + lmem_total / (1024 * 1024);
+
             // Reset visited counters for new search
             unsigned short* temp_curV = new unsigned short[query_nb];
             for (int i = 0; i < query_nb; i++) temp_curV[i] = 1;
@@ -459,7 +470,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             
             // Write result row immediately
             if (outfile.is_open()) {
-                outfile << ef << "," << recall << "," << qps << "," << avg_dco << "," << avg_hops << "\n";
+                outfile << ef << "," << recall << "," << qps << "," << avg_dco << "," << avg_hops << "," << vram_used_mb << "," << peak_vram_mb << "\n";
                 outfile.flush();
             }
             

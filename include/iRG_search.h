@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <sys/resource.h>
 #include "utils.h"
 #include "searcher.hpp"
 #include "memory.hpp"
@@ -364,6 +365,7 @@ namespace iRangeGraph
                 std::vector<float> QPS;    // Queries per second
                 std::vector<float> RECALL; // Recall accuracy
 
+                outfile << "SearchEF,Recall,QPS,DCO,HOP,RAM_MB\n";
                 std::cout << "suffix = " << suffix << std::endl;
                 for (auto ef : SearchEF)
                 {
@@ -411,9 +413,13 @@ namespace iRangeGraph
                     QPS.emplace_back(qps);
                     RECALL.emplace_back(recall);
                 }
+                struct rusage usage;
+                getrusage(RUSAGE_SELF, &usage);
+                long ram_mb = usage.ru_maxrss / 1024;
+
                 for (int i = 0; i < RECALL.size(); i++)
                 {
-                    outfile << SearchEF[i] << "," << RECALL[i] << "," << QPS[i] << "," << DCO[i] << "," << HOP[i] << std::endl;
+                    outfile << SearchEF[i] << "," << RECALL[i] << "," << QPS[i] << "," << DCO[i] << "," << HOP[i] << "," << ram_mb << std::endl;
                 }
                 outfile.close();
             }

@@ -48,7 +48,7 @@ if [ ! -f "build/tests/buildindex" ] || [ ! -f "build/tests/search" ]; then
     echo "Build complete."
 fi
 
-bash scripts/build_gist_indexes.sh
+bash scripts/build_indexes.sh gist
 
 echo "=========================================="
 echo "GIST Index Build completed: $(date)"
