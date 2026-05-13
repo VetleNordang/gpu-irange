@@ -584,6 +584,21 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     // Vector of (SearchEF, Recall, QPS, DCO, HOP) for current suffix
     std::vector<std::tuple<int, float, float, float, float>> current_suffix_results;
     
+    // Allocate ADC distance table buffer: one flat table per query.
+    // Each table is pq_M * pq_ksub floats. Allocated once, reused across all ef values and suffixes.
+    {
+        int qnb = index.storage->query_nb;
+        size_t table_floats = (size_t)gpu_index.pq_M * gpu_index.pq_ksub;
+        size_t table_bytes  = (size_t)qnb * table_floats * sizeof(float);
+        cudaError_t err = cudaMalloc(&gpu_index.d_dist_tables, table_bytes);
+        if (err != cudaSuccess) {
+            printf("ERROR: Failed to allocate ADC distance tables: %s\n", cudaGetErrorString(err));
+            return;
+        }
+        printf("✓ ADC distance tables allocated: %d queries × %zu floats = %.1f MB\n",
+               qnb, table_floats, table_bytes / (1024.0 * 1024.0));
+    }
+
     // Iterate over all suffixes in storage->query_range (same as CPU version)
     size_t suffix_idx = 0;
     for (auto range : index.storage->query_range) {
@@ -727,6 +742,12 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     }
     
     
+    // Free ADC distance table buffer
+    if (gpu_index.d_dist_tables) {
+        cudaFree(gpu_index.d_dist_tables);
+        gpu_index.d_dist_tables = nullptr;
+    }
+
     printf("\n========================================\n");
     printf("All suffixes processed and results written!\n");
     printf("========================================\n");

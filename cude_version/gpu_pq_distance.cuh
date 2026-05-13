@@ -85,6 +85,61 @@ __device__ float gpu_compute_pq_distance_direct(
     return distance_sq;
 }
 
+// ============ ADC (Asymmetric Distance Computation) ============
+// All threads in the block cooperate to build a distance table once per query.
+// Table layout: dist_table[m * ksub + k] = L2(query_subvector[m], centroid[m][k])
+// Must be followed by __syncthreads() before the search loop begins.
+__device__ void build_adc_table(
+    const float* query_vector,
+    const float* centroids,
+    float* dist_table,
+    int M, int ksub, int dsub,
+    int thread_id, int num_threads)
+{
+    const int total_entries = M * ksub;
+    for (int idx = thread_id; idx < total_entries; idx += num_threads) {
+        int m = idx / ksub;
+        int k = idx % ksub;
+        const float* centroid = &centroids[(m * ksub + k) * dsub];
+        const float* q_sub    = &query_vector[m * dsub];
+        float d = 0.0f;
+        for (int i = 0; i < dsub; i++) {
+            float diff = q_sub[i] - centroid[i];
+            d += diff * diff;
+        }
+        dist_table[idx] = d;
+    }
+}
+
+// Single-thread ADC distance lookup — replaces PQDistance()
+__device__ float adc_distance(
+    const uint8_t* db_code,
+    const float* dist_table,
+    int M, int nbits, int ksub)
+{
+    float distance = 0.0f;
+    for (int m = 0; m < M; m++) {
+        uint32_t k = gpu_extract_centroid_index_direct(db_code, m, nbits);
+        distance += dist_table[m * ksub + k];
+    }
+    return distance;
+}
+
+// Cooperative partial-sum ADC lookup — replaces PQDistancePartial()
+__device__ float adc_distance_partial(
+    const uint8_t* db_code,
+    const float* dist_table,
+    int M, int nbits, int ksub,
+    int lane_in_group, int threads_in_group)
+{
+    float partial = 0.0f;
+    for (int m = lane_in_group; m < M; m += threads_in_group) {
+        uint32_t k = gpu_extract_centroid_index_direct(db_code, m, nbits);
+        partial += dist_table[m * ksub + k];
+    }
+    return partial;
+}
+
 // Batch compute: optimized for multiple queries
 __device__ float gpu_compute_pq_distance_batch(
     const float* query_vector,              // Single query (n*d floats)

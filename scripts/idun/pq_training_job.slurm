@@ -34,6 +34,7 @@ module load Anaconda3/2024.02-1
 
 CONDA_FAISS=/cluster/home/vetlean/.conda/envs/irange
 export LD_LIBRARY_PATH="$CONDA_FAISS/lib:$LD_LIBRARY_PATH"
+export LIBRARY_PATH="$CONDA_FAISS/lib:$LIBRARY_PATH"   # compile-time linker search path
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 if [ ! -f "build/tests/pq_compress_only" ]; then
@@ -44,6 +45,7 @@ if [ ! -f "build/tests/pq_compress_only" ]; then
         -DENABLE_FAISS=ON \
         -DFAISS_INCLUDE_DIR="$CONDA_FAISS/include" \
         -DFAISS_LIBRARY="$CONDA_FAISS/lib/libfaiss.so" \
+        -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,$CONDA_FAISS/lib -L$CONDA_FAISS/lib" \
         || { echo "ERROR: cmake failed"; exit 1; }
     make -j"$SLURM_CPUS_PER_TASK" pq_compress_only \
         || { echo "ERROR: make failed"; exit 1; }

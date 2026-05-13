@@ -72,6 +72,9 @@ struct GPUIndex {
     void* pq_model;                   // Pointer to faiss::ProductQuantizer (CPU)
     std::vector<uint8_t> pq_codes_cpu; // PQ codes on CPU
     
+    // ADC distance table: [query_nb][pq_M * pq_ksub] floats, built once per kernel launch
+    float* d_dist_tables = nullptr;
+
     // Track GPU memory sizes for proper cleanup
     size_t gpu_codes_size;
     size_t gpu_centroids_size;
@@ -113,6 +116,10 @@ void GPUIndex::free() {
     if (d_centroids) {
         cudaFree(d_centroids);
         d_centroids = nullptr;
+    }
+    if (d_dist_tables) {
+        cudaFree(d_dist_tables);
+        d_dist_tables = nullptr;
     }
     pq_codes_cpu.clear();
     pq_codes_cpu.shrink_to_fit();

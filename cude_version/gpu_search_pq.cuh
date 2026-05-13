@@ -95,6 +95,19 @@ __global__ void irange_search_kernel_pq(
     int    ql           = gpu_index.d_query_range[range_idx];
     int    qr           = gpu_index.d_query_range[range_idx + 1];
 
+    // --- ADC distance table build (all 128 threads cooperate) ---
+    float* my_dist_table = gpu_index.d_dist_tables
+                         + (long long)query_id * gpu_index.pq_M * gpu_index.pq_ksub;
+
+    build_adc_table(
+        query_vector,
+        gpu_index.d_centroids,
+        my_dist_table,
+        gpu_index.pq_M, gpu_index.pq_ksub, gpu_index.pq_dsub,
+        threadIdx.x, blockDim.x);
+
+    __syncthreads();  // all threads must finish building the table before any thread reads it
+
     // --- Heap storage (lane 0 only) ---
     HeapNode candidate_buffer    [MAX_SEARCH_EF];
     HeapNode top_candidate_buffer[MAX_SEARCH_EF];
@@ -126,12 +139,12 @@ __global__ void irange_search_kernel_pq(
             if (isVisited(visited, query_id, entry_point)) continue;
             markVisited(visited, query_id, entry_point);
 
-            // USE PQ DISTANCE for entry point
-            float entry_dist = PQDistance(
-                query_vector, entry_point,
-                gpu_index.d_compressed_codes, gpu_index.d_centroids,
-                gpu_index.pq_M, gpu_index.pq_nbits, gpu_index.pq_dsub,
-                gpu_index.pq_code_size, gpu_index.pq_ksub);
+            // ADC table lookup for entry point
+            const uint8_t* entry_code = gpu_index.d_compressed_codes
+                                      + (long long)entry_point * gpu_index.pq_code_size;
+            float entry_dist = adc_distance(
+                entry_code, my_dist_table,
+                gpu_index.pq_M, gpu_index.pq_nbits, gpu_index.pq_ksub);
             
             dist_comp_count++;
 
@@ -190,12 +203,12 @@ __global__ void irange_search_kernel_pq(
                 int neighbor_idx = edge_base + neighbor_slot;
                 int neighbor_id  = s_edges[warp_in_blk][neighbor_idx];
 
-                // USE PQ DISTANCE with cooperative threads
-                float partial = PQDistancePartial(
-                    query_vector, neighbor_id,
-                    gpu_index.d_compressed_codes, gpu_index.d_centroids,
-                    gpu_index.pq_M, gpu_index.pq_nbits, gpu_index.pq_dsub,
-                    gpu_index.pq_code_size, gpu_index.pq_ksub,
+                // ADC table lookup with cooperative threads
+                const uint8_t* nb_code = gpu_index.d_compressed_codes
+                                       + (long long)neighbor_id * gpu_index.pq_code_size;
+                float partial = adc_distance_partial(
+                    nb_code, my_dist_table,
+                    gpu_index.pq_M, gpu_index.pq_nbits, gpu_index.pq_ksub,
                     lane_in_group, DIST_THREADS_PER_NEIGHBOR);
 
                 // Reduce across group
