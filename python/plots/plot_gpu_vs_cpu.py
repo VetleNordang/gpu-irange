@@ -38,7 +38,13 @@ def read_csv_files(result_dir):
     if not result_dir.exists():
         return None
 
-    csv_files = sorted(glob.glob(os.path.join(result_dir, "*.csv")))
+    # Prefer aggregate/ subdirectory (statistically correct mean across runs).
+    # Fall back to raw CSVs in result_dir itself (e.g. cpu_serial which has no run dirs).
+    aggregate_dir = result_dir / "aggregate"
+    read_dir = aggregate_dir if aggregate_dir.is_dir() else result_dir
+    is_aggregate = aggregate_dir.is_dir()
+
+    csv_files = sorted(glob.glob(os.path.join(read_dir, "*.csv")))
     if not csv_files:
         return None
 
@@ -48,6 +54,11 @@ def read_csv_files(result_dir):
             df = pd.read_csv(csv_file)
             if 'SearchEF' not in df.columns:
                 df = pd.read_csv(csv_file, names=['SearchEF', 'Recall', 'QPS', 'DCO', 'HOP'])
+
+            # Aggregate CSVs use Recall_mean / QPS_mean — normalise to Recall / QPS.
+            if is_aggregate:
+                rename = {c: c.replace('_mean', '') for c in df.columns if c.endswith('_mean')}
+                df = df.rename(columns=rename)
 
             match = re.search(r'(\d+)(?:_gpu)?\.csv$', os.path.basename(csv_file))
             if match:
@@ -71,14 +82,15 @@ def get_series_by_suffix(df, suffix):
         return None
     return suffix_df.groupby('SearchEF').agg({'Recall': 'mean', 'QPS': 'mean'}).sort_index()
 
-def plot_methods_comparison(cpu_df, gpu_normal_df, gpu_pq_df, dataset_name, output_dir, env_tag=None):
+def plot_methods_comparison(cpu_serial_df, cpu_parallel_df, gpu_normal_df, gpu_pq_df, dataset_name, output_dir, env_tag=None):
     tag_label = f" [{env_tag.upper()}]" if env_tag else ""
     tag_suffix = f"_{env_tag}" if env_tag else ""
 
     methods = {
-        "CPU":         {"df": cpu_df,        "color": "tab:blue"},
-        "GPU (Normal)":{"df": gpu_normal_df, "color": "tab:orange"},
-        "GPU (PQ)":    {"df": gpu_pq_df,     "color": "tab:green"},
+        "CPU Serial":   {"df": cpu_serial_df,   "color": "tab:gray"},
+        "CPU Parallel": {"df": cpu_parallel_df, "color": "tab:blue"},
+        "GPU (Normal)": {"df": gpu_normal_df,   "color": "tab:orange"},
+        "GPU (PQ)":     {"df": gpu_pq_df,       "color": "tab:green"},
     }
     suffix_markers = {"2": "o", "5": "s", "8": "^"}
 
@@ -151,12 +163,12 @@ def plot_methods_comparison(cpu_df, gpu_normal_df, gpu_pq_df, dataset_name, outp
         plt.close()
         print(f"  ✓ Saved: {out}")
 
-    # ── Plot 3: GPU Normal speedup over CPU ──────────────────────────────────
+    # ── Plot 3: GPU Normal speedup over CPU Parallel ─────────────────────────
     fig, ax = plt.subplots(figsize=(10, 8))
     plotted_any = False
-    if cpu_df is not None and gpu_normal_df is not None:
+    if cpu_parallel_df is not None and gpu_normal_df is not None:
         for suffix in TARGET_SUFFIXES:
-            cpu_series = get_series_by_suffix(cpu_df, suffix)
+            cpu_series = get_series_by_suffix(cpu_parallel_df, suffix)
             gpu_series = get_series_by_suffix(gpu_normal_df, suffix)
             if cpu_series is not None and gpu_series is not None:
                 common_efs = cpu_series.index.intersection(gpu_series.index)
@@ -173,8 +185,8 @@ def plot_methods_comparison(cpu_df, gpu_normal_df, gpu_pq_df, dataset_name, outp
         plt.close()
     else:
         ax.set_xlabel('SearchEF', fontsize=12)
-        ax.set_ylabel('Speedup (GPU Normal QPS / CPU QPS)', fontsize=12)
-        ax.set_title(f'{dataset_name}: GPU Normal Speedup over CPU (Ranges 2, 5, 8){tag_label}',
+        ax.set_ylabel('Speedup (GPU Normal QPS / CPU Parallel QPS)', fontsize=12)
+        ax.set_title(f'{dataset_name}: GPU Normal Speedup over CPU Parallel (Ranges 2, 5, 8){tag_label}',
                      fontsize=14, fontweight='bold')
         ax.legend(fontsize=10, bbox_to_anchor=(1.05, 1), loc='upper left')
         ax.grid(True, alpha=0.3)
@@ -219,24 +231,26 @@ def main():
         output_dir = dataset_dir / "results" / "analysis"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        cpu_df        = read_csv_files(dataset_dir / "results" / "cpu_serial")
-        gpu_normal_df = read_csv_files(dataset_dir / "results" / "gpu_normal")
-        gpu_pq_df     = read_csv_files(dataset_dir / "results" / "gpu_pq")
+        cpu_serial_df   = read_csv_files(dataset_dir / "results" / "cpu_serial")
+        cpu_parallel_df = read_csv_files(dataset_dir / "results" / "cpu_parallel")
+        gpu_normal_df   = read_csv_files(dataset_dir / "results" / "gpu_normal")
+        gpu_pq_df       = read_csv_files(dataset_dir / "results" / "gpu_pq")
 
         def count_unique(df):
             return len(df['Suffix'].unique()) if df is not None else 0
 
-        print(f"  Found ranges: CPU={count_unique(cpu_df)}, "
+        print(f"  Found ranges: CPU_Serial={count_unique(cpu_serial_df)}, "
+              f"CPU_Parallel={count_unique(cpu_parallel_df)}, "
               f"GPU_Normal={count_unique(gpu_normal_df)}, GPU_PQ={count_unique(gpu_pq_df)}")
 
-        if cpu_df is None and gpu_normal_df is None and gpu_pq_df is None:
+        if cpu_serial_df is None and cpu_parallel_df is None and gpu_normal_df is None and gpu_pq_df is None:
             print("  ✗ No data found for any method.")
             failure_count += 1
             print()
             continue
 
         try:
-            plot_methods_comparison(cpu_df, gpu_normal_df, gpu_pq_df,
+            plot_methods_comparison(cpu_serial_df, cpu_parallel_df, gpu_normal_df, gpu_pq_df,
                                     dataset['name'], output_dir, env_tag=args.env)
             success_count += 1
         except Exception as e:

@@ -40,7 +40,7 @@ if [ ! -f "build/tests/pq_compress_only" ]; then
     mkdir -p build && cd build
     cmake .. \
         -DCMAKE_BUILD_TYPE=Release \
-        -DUSE_FAISS=ON \
+        -DENABLE_FAISS=ON \
         -DFAISS_INCLUDE_DIR="$CONDA_FAISS/include" \
         -DFAISS_LIBRARY="$CONDA_FAISS/lib/libfaiss.so" \
         || { echo "ERROR: cmake failed"; exit 1; }
