@@ -22,14 +22,14 @@ DATASETS = [
     {"key": "gist500k",  "name": "GIST 500k",              "path": "gist1m/500k"},
     {"key": "gist750k",  "name": "GIST 750k",              "path": "gist1m/750k"},
     {"key": "gist1000k", "name": "GIST 1000k",             "path": "gist1m/1000k"},
-    {"key": "video_1m",  "name": "Video 1M (YouTube RGB)", "path": "video/1m"},
-    {"key": "video_2m",  "name": "Video 2M (YouTube RGB)", "path": "video/2m"},
-    {"key": "video_4m",  "name": "Video 4M (YouTube RGB)", "path": "video/4m"},
-    {"key": "video_8m",  "name": "Video 8M (YouTube RGB)", "path": "video/8m"},
-    {"key": "audi_1m",   "name": "Audi 1M",                "path": "audi/1m"},
-    {"key": "audi_2m",   "name": "Audi 2M",                "path": "audi/2m"},
-    {"key": "audi_4m",   "name": "Audi 4M",                "path": "audi/4m"},
-    {"key": "audi_8m",   "name": "Audi 8M",                "path": "audi/8m"},
+    {"key": "video1m",  "name": "Video 1M (YouTube RGB)", "path": "video/1m"},
+    {"key": "video2m",  "name": "Video 2M (YouTube RGB)", "path": "video/2m"},
+    {"key": "video4m",  "name": "Video 4M (YouTube RGB)", "path": "video/4m"},
+    {"key": "video8m",  "name": "Video 8M (YouTube RGB)", "path": "video/8m"},
+    {"key": "audi1m",   "name": "Audi 1M",                "path": "audi/1m"},
+    {"key": "audi2m",   "name": "Audi 2M",                "path": "audi/2m"},
+    {"key": "audi4m",   "name": "Audi 4M",                "path": "audi/4m"},
+    {"key": "audi8m",   "name": "Audi 8M",                "path": "audi/8m"},
 ]
 
 TARGET_SUFFIXES = ["2", "5", "8"]
@@ -219,7 +219,7 @@ def main():
         output_dir = dataset_dir / "results" / "analysis"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        cpu_df        = read_csv_files(dataset_dir / "results" / "cpu_normal")
+        cpu_df        = read_csv_files(dataset_dir / "results" / "cpu_serial")
         gpu_normal_df = read_csv_files(dataset_dir / "results" / "gpu_normal")
         gpu_pq_df     = read_csv_files(dataset_dir / "results" / "gpu_pq")
 
