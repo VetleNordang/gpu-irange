@@ -31,7 +31,7 @@ DATA_ROOT = PROJECT_ROOT / "executable_data"
 
 MODES = ["cpu_serial", "cpu_parallel", "gpu_normal", "gpu_pq"]
 
-METRICS = ["Recall", "QPS", "DCO", "HOP"]
+METRICS = ["Recall", "QPS", "DCO", "HOP", "RAM_MB", "VRAM_MB", "PeakVRAM_MB"]
 
 
 def aggregate_mode_dir(mode_dir: Path) -> bool:

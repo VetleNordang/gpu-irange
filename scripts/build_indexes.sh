@@ -6,10 +6,15 @@
 
 BUILDINDEX="./build/tests/buildindex"
 DATA_ROOT="executable_data"
+LOG_FILE="logs/build_indexes.log"
 
 M=32
 EF_CONSTRUCTION=200
 THREADS=$(nproc)
+
+mkdir -p logs
+# Overwrite log from previous run
+exec > >(tee "$LOG_FILE") 2>&1
 
 if [ ! -f "$BUILDINDEX" ]; then
     echo "ERROR: buildindex not found at $BUILDINDEX"
@@ -21,7 +26,9 @@ TARGET="${1:-all}"
 
 echo "================================================"
 echo "Building HNSW Indexes  [$TARGET]"
+echo "  Started:        $(date)"
 echo "  M=$M  ef_construction=$EF_CONSTRUCTION  threads=$THREADS"
+echo "  Log:            $LOG_FILE"
 echo "================================================"
 
 build_index() {
