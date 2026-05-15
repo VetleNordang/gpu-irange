@@ -20,7 +20,7 @@ docker build -f .devcontainer/Dockerfile -t irange-dev .
 
 ```bash
 # This mounts your current directory to /workspaces/irange inside the container
-docker run -it --gpus all -v $(pwd):/workspaces/irange irange-dev
+docker run -it --gpus all -v $(pwd):/workspaces/irange -v /data/vetlean:/data/vetlean irange-dev
 ```
 
 ### 4. Now you're inside the container terminal (inside screen)

@@ -35,7 +35,8 @@
 	// "postCreateCommand": "pip3 install -r python/requirements.txt",
 	
 	"mounts": [
-		"source=/lhome/vetlean/.claude,target=/home/vetlean/.claude,type=bind,consistency=cached"
+		"source=/lhome/vetlean/.claude,target=/home/vetlean/.claude,type=bind,consistency=cached",
+		"source=/data/vetlean,target=/data/vetlean,type=bind,consistency=cached"
 	],
 	"onCreateCommand": "mkdir -p /home/vetlean/.claude && chown -R vetlean:vetlean /workspaces/irange /home/vetlean/.claude",
 	"postCreateCommand": "bash .devcontainer/postCreate.sh",
