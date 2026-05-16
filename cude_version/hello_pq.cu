@@ -425,8 +425,8 @@ void load_pq_model_to_gpu(GPUIndex &gpu_index, faiss::ProductQuantizer* pq_model
     printf("  - Format: float32\n");
 }
 
-void load_pq_codes_to_gpu(GPUIndex &gpu_index, const std::vector<uint8_t>& pq_codes, 
-                          int n_vectors, int M, int code_size, int ksub, int dsub) {
+void load_pq_codes_to_gpu(GPUIndex &gpu_index, const std::vector<uint8_t>& pq_codes,
+                          int n_vectors, int M, int nbits, int code_size, int ksub, int dsub) {
     gpu_index.pq_codes_cpu = pq_codes;  // Keep a copy on CPU for reference
 
     gpu_index.gpu_codes_size = (size_t)pq_codes.size() * sizeof(uint8_t);
@@ -435,8 +435,8 @@ void load_pq_codes_to_gpu(GPUIndex &gpu_index, const std::vector<uint8_t>& pq_co
     size_t centroids_size = (size_t)M * ksub * dsub * sizeof(float);
     
     printf("\n========== PQ MEMORY BREAKDOWN ==========\n");
-    printf("PQ Model parameters: n=%d, M=%d, nbits=?, ksub=%d, dsub=%d\n", 
-           n_vectors, M, ksub, dsub);
+    printf("PQ Model parameters: n=%d, M=%d, nbits=%d, ksub=%d, dsub=%d\n",
+           n_vectors, M, nbits, ksub, dsub);
     printf("\nPQ-specific allocations:\n");
     printf("  PQ codes: %zu bytes (%.2f MB) = %d vectors × %d bytes/code\n", 
            gpu_index.gpu_codes_size, gpu_index.gpu_codes_size / (1024.0*1024.0), 
@@ -464,8 +464,8 @@ void load_pq_codes_to_gpu(GPUIndex &gpu_index, const std::vector<uint8_t>& pq_co
     
     printf("\n[GPU TRANSFER] PQ Codes (Compressed Vectors):\n");
     printf("  - Total vectors: %d\n", n_vectors);
-    printf("  - Code size per vector: %d bytes (M=%d subspaces, %d bits each)\n", 
-           code_size, M, 8 / (M > 0 ? (int)log2(ksub) : 1));
+    printf("  - Code size per vector: %d bytes (M=%d subspaces, %d bits each)\n",
+           code_size, M, nbits);
     printf("  - Total codes: %zu bytes (%.2f MB)\n", 
            gpu_index.gpu_codes_size, gpu_index.gpu_codes_size / (1024.0*1024.0));
     printf("  - Format: uint8_t (byte-aligned codes)\n");
@@ -529,7 +529,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     make_result_buffer_on_gpu(index, gpu_index);
 
     load_pq_model_to_gpu(gpu_index, pq_model);
-    load_pq_codes_to_gpu(gpu_index, pq_blob.codes, pq_blob.n, pq_blob.M, pq_blob.code_size, pq_model->ksub, pq_model->dsub);
+    load_pq_codes_to_gpu(gpu_index, pq_blob.codes, pq_blob.n, pq_blob.M, pq_blob.nbits, pq_blob.code_size, pq_model->ksub, pq_model->dsub);
     
     // ===== PRINT GPU MEMORY SUMMARY =====
     size_t adjacency_lists_size = (size_t)index.max_elements_ * index.size_links_per_element_;
