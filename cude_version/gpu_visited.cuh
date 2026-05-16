@@ -78,17 +78,18 @@ struct GPUVisitedArray {
 // node_id: which node to check (0 to max_elements-1)
 __device__ inline bool isVisited(const GPUVisitedArray& visited, int query_id, int node_id) {
     // Calculate offset: each query has its own section of the array
-    int offset = query_id * visited.max_elements + node_id;
-    
+    // Cast to long long to prevent int32 overflow for datasets with >2.1M elements
+    long long offset = (long long)query_id * visited.max_elements + node_id;
+
     // Compare: does the number on this node match my current game number?
     return visited.d_mass[offset] == visited.d_curV[query_id];
 }
 
 // Mark a node as visited in this search
 __device__ inline void markVisited(GPUVisitedArray& visited, int query_id, int node_id) {
-    // Calculate offset
-    int offset = query_id * visited.max_elements + node_id;
-    
+    // Cast to long long to prevent int32 overflow for datasets with >2.1M elements
+    long long offset = (long long)query_id * visited.max_elements + node_id;
+
     // Write current game number to this node
     visited.d_mass[offset] = visited.d_curV[query_id];
 }

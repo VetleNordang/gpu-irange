@@ -261,7 +261,7 @@ void load_segment_tree_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPU
     iRangeGraph::SegmentTree *tree = index.tree;
     std::vector<GPUNode> gpu_nodes = tree->FlattenGPUTree();
     
-    int mem_to_allocate_to_gpu = gpu_nodes.size() * sizeof(GPUNode);
+    size_t mem_to_allocate_to_gpu = gpu_nodes.size() * sizeof(GPUNode);
 
     // Initialize segment tree structure
     gpu_index.d_segment_tree.num_nodes = gpu_nodes.size();

@@ -168,14 +168,16 @@ void search_on_gpu(iRangeGraph::DataLoader &storage, iRangeGraph::SegmentTree *t
         printf("  Avg Distance Computations: %.2f\n", avg_dist_comps);
         printf("  Avg Hops: %.2f\n", avg_hops);
         
-        // Write results to file
+        // Write results to file (append so multiple EF values accumulate)
         std::string savepath = paths["result_saveprefix"] + std::to_string(suffix) + "_GPU.csv";
         CheckPath(savepath);
-        std::ofstream outfile(savepath);
+        bool write_header = !std::ifstream(savepath).good();
+        std::ofstream outfile(savepath, std::ios::app);
         if (!outfile.is_open()) {
             printf("Warning: cannot open %s\n", savepath.c_str());
         } else {
-            outfile << "SearchEF,Recall,QPS,DistComps,Hops\n";
+            if (write_header)
+                outfile << "SearchEF,Recall,QPS,DistComps,Hops\n";
             outfile << SearchEF << "," << recall << "," << qps << "," << avg_dist_comps << "," << avg_hops << std::endl;
             outfile.close();
             printf("Results written to %s\n", savepath.c_str());
@@ -247,12 +249,13 @@ int main(int argc, char **argv) {
 
     std::cout << "Loading index..." << std::endl;
     iRangeGraph::iRangeGraph_Search<float> index(paths["data_vector"], paths["index"], &storage, M);
-    int SearchEF = 500;
-    
-    search_on_gpu(storage, index.tree, SearchEF, M, index.max_elements_, index.dim_, 
-                  index.data_memory_, index.size_data_per_element_, index.offsetData_, index.size_links_per_layer_, query_K, &index);
-    
-    cudaDeviceSynchronize();
+    std::vector<int> searchEFs = {1700, 1400, 1100, 1000, 900, 800, 700, 600, 500, 400, 300, 250, 200, 180, 160, 140, 120, 100, 90, 80, 70, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10};
+
+    for (int SearchEF : searchEFs) {
+        search_on_gpu(storage, index.tree, SearchEF, M, index.max_elements_, index.dim_,
+                      index.data_memory_, index.size_data_per_element_, index.offsetData_, index.size_links_per_layer_, query_K, &index);
+        cudaDeviceSynchronize();
+    }
     printf("GPU search completed!\n");
     
     return 0;

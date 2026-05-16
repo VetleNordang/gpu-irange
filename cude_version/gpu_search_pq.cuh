@@ -85,9 +85,10 @@ __global__ void irange_search_kernel_pq(
     if (query_id >= query_nb) return;
 
     // --- Shared memory ---
-    __shared__ int   s_edges    [MAX_QUERIES_PER_BLOCK][NEIGHBORS_PER_BATCH];
-    __shared__ float s_dists    [MAX_QUERIES_PER_BLOCK][NEIGHBORS_PER_BATCH];
-    __shared__ int   s_num_edges[MAX_QUERIES_PER_BLOCK];
+    __shared__ int   s_edges      [MAX_QUERIES_PER_BLOCK][NEIGHBORS_PER_BATCH];
+    __shared__ float s_dists      [MAX_QUERIES_PER_BLOCK][NEIGHBORS_PER_BATCH];
+    __shared__ int   s_num_edges  [MAX_QUERIES_PER_BLOCK];
+    __shared__ int   s_current_id [MAX_QUERIES_PER_BLOCK];
 
     // --- Per-query values ---
     float* query_vector = gpu_index.d_query_vectors + (long long)query_id * dim;
@@ -162,7 +163,7 @@ __global__ void irange_search_kernel_pq(
     // Phase 2 - Greedy search with parallel distance computation
     // =========================================================
     while (true) {
-        // --- Lane 0: advance one greedy step ---
+        // --- Lane 0: pop candidate and decide whether to continue ---
         if (lane_id == 0) {
             if (candidate_set.empty()) {
                 s_num_edges[warp_in_blk] = -1;
@@ -173,18 +174,24 @@ __global__ void irange_search_kernel_pq(
                     s_num_edges[warp_in_blk] = -1;
                 } else {
                     candidate_set.pop();
-                    SelectEdge_gpu(current.id, ql, qr, NEIGHBORS_PER_BATCH,
-                                   gpu_index.d_segment_tree.d_nodes, 0,
-                                   gpu_index.d_data_memory,
-                                   gpu_index.d_size_data_per_element,
-                                   size_links_per_layer,
-                                   visited, query_id,
-                                   s_edges[warp_in_blk], &s_num_edges[warp_in_blk],
-                                   lane_id);
+                    s_current_id[warp_in_blk] = current.id;
+                    s_num_edges[warp_in_blk]  = 0;
                 }
             }
         }
+        __syncthreads();
 
+        // --- All threads cooperate on SelectEdge_gpu (it uses __syncthreads internally) ---
+        if (s_num_edges[warp_in_blk] != -1) {
+            SelectEdge_gpu(s_current_id[warp_in_blk], ql, qr, NEIGHBORS_PER_BATCH,
+                           gpu_index.d_segment_tree.d_nodes, 0,
+                           gpu_index.d_data_memory,
+                           gpu_index.d_size_data_per_element,
+                           size_links_per_layer,
+                           visited, query_id,
+                           s_edges[warp_in_blk], &s_num_edges[warp_in_blk],
+                           lane_id);
+        }
         __syncthreads();
 
         if (s_num_edges[warp_in_blk] == -1) break;
