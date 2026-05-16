@@ -653,6 +653,8 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             // Launch appropriate kernel (PQ or normal) - no branching inside kernel
             unsigned long long kernel_seed = std::chrono::system_clock::now().time_since_epoch().count();
             
+            printf("    suffix %d  ef=%d  launching kernel...\n", suffix, ef);
+
             cudaEvent_t start, stop;
             cudaEventCreate(&start);
             cudaEventCreate(&stop);
@@ -715,6 +717,9 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             }
             float avg_hops = (float)total_hops / query_nb;
             float avg_dco = (float)total_dist_comps / query_nb;
+
+            printf("    suffix %d  ef=%d  recall=%.4f  QPS=%.1f  DCO=%.1f  HOP=%.1f  time=%.3fs\n",
+                   suffix, ef, recall, qps, avg_dco, avg_hops, searchtime);
             
             // Store results for this suffix
             current_suffix_results.push_back(std::make_tuple(ef, recall, qps, avg_dco, avg_hops));
@@ -775,6 +780,8 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
 
 
 int main(int argc, char **argv) {
+
+    setvbuf(stdout, NULL, _IOLBF, 0);  // line-buffered stdout: live progress in SLURM logs
 
     for (int i = 0; i < argc; i++)
     {
