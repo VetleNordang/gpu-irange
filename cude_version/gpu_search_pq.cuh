@@ -206,26 +206,28 @@ __global__ void irange_search_kernel_pq(
             const int neighbor_slot   = lane_id / DIST_THREADS_PER_NEIGHBOR;
             const int lane_in_group   = lane_id % DIST_THREADS_PER_NEIGHBOR;
 
+            float partial = 0.0f;
             if (neighbor_slot < edges_in_batch) {
                 int neighbor_idx = edge_base + neighbor_slot;
                 int neighbor_id  = s_edges[warp_in_blk][neighbor_idx];
 
-                // ADC table lookup with cooperative threads
                 const uint8_t* nb_code = gpu_index.d_compressed_codes
                                        + (long long)neighbor_id * gpu_index.pq_code_size;
-                float partial = adc_distance_partial(
+                partial = adc_distance_partial(
                     nb_code, my_dist_table,
                     gpu_index.pq_M, gpu_index.pq_nbits, gpu_index.pq_ksub,
                     lane_in_group, DIST_THREADS_PER_NEIGHBOR);
+            }
 
-                // Reduce across group
-                for (int offset = DIST_THREADS_PER_NEIGHBOR / 2; offset > 0; offset >>= 1) {
-                    partial += __shfl_down_sync(0xffffffff, partial, offset, DIST_THREADS_PER_NEIGHBOR);
-                }
+            // All threads participate — inactive threads contribute 0.0f.
+            // Volta (V100) ITS requires all masked threads reach __shfl_sync;
+            // placing this inside the if-block deadlocks when the batch is partial.
+            for (int offset = DIST_THREADS_PER_NEIGHBOR / 2; offset > 0; offset >>= 1) {
+                partial += __shfl_down_sync(0xffffffff, partial, offset, DIST_THREADS_PER_NEIGHBOR);
+            }
 
-                if (lane_in_group == 0) {
-                    s_dists[warp_in_blk][neighbor_slot] = partial;
-                }
+            if (neighbor_slot < edges_in_batch && lane_in_group == 0) {
+                s_dists[warp_in_blk][neighbor_slot] = partial;
             }
 
             __syncthreads();
