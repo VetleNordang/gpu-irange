@@ -12,7 +12,7 @@ OPT_TARGET = $(BUILD_DIR)/optimized_test
 PQ_TARGET = $(BUILD_DIR)/hello_pq
 SOURCE = hello.cu
 PQ_SOURCE = hello_pq.cu
-HEADERS = gpu_search.cuh gpu_search_updated.cuh ../include/iRG_search.h ../include/utils.h
+HEADERS = gpu_search.cuh gpu_search_updated.cuh gpu_search_pq.cuh gpu_pq_distance.cuh gpu_index.cuh gpu_heap.cuh gpu_visited.cuh ../include/iRG_search.h ../include/utils.h
 
 # FAISS support
 ENABLE_FAISS ?= 1
