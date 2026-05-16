@@ -105,7 +105,7 @@ $(TARGET): $(BUILD_DIR) $(SOURCE) $(HEADERS)
 	$(NVCC) $(ARCH) $(INCLUDE) $(FAISS_CFLAGS) -Xcompiler "-DENABLE_FAISS,-fopenmp" -Xcompiler "-lgomp" $(SOURCE) -o $(TARGET) $(FAISS_LIB_PATH) -lgomp -lblas -llapack -lfaiss
 
 $(PQ_TARGET): $(BUILD_DIR) $(PQ_SOURCE) $(HEADERS)
-	$(NVCC) $(ARCH) $(INCLUDE) $(FAISS_CFLAGS) -Xcompiler "-DENABLE_FAISS,-fopenmp" -Xcompiler "-lgomp" $(PQ_SOURCE) -o $(PQ_TARGET) $(FAISS_LIB_PATH) -lgomp -lblas -llapack -lfaiss
+	$(NVCC) $(ARCH) $(OPT_FLAGS) $(INCLUDE) $(FAISS_CFLAGS) -Xcompiler "$(FAISS_CFLAGS),-fopenmp,-lgomp" $(PQ_SOURCE) -o $(PQ_TARGET) $(FAISS_LIB_PATH) -lgomp -lblas -llapack -lfaiss
 
 optimized_test: $(OPT_TARGET)
 
