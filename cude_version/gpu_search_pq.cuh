@@ -170,7 +170,7 @@ __global__ void irange_search_kernel_pq(
             } else {
                 HeapNode current = candidate_set.top();
                 hop_count++;
-                if (current.dist > lowerBound) {
+                if (current.dist > lowerBound || hop_count > 3 * SearchEF + 500) {
                     s_num_edges[warp_in_blk] = -1;
                 } else {
                     candidate_set.pop();
