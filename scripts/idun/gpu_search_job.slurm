@@ -6,13 +6,13 @@
 
 #SBATCH --partition=GPUQ
 #SBATCH --account=share-ie-idi
-#SBATCH --time=48:00:00
+#SBATCH --time=24:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
 #SBATCH --gres=gpu:1
-#SBATCH --constraint="gpu80g|gpu40g|gpu32g"
+#SBATCH --constraint="gpu80g"
 #SBATCH --job-name="irange_gpu_all"
 #SBATCH --output=logs/gpu_search_%j.log
 #SBATCH --mail-user=nordang.vetle@gmail.com
