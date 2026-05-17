@@ -74,13 +74,13 @@ fi
 # Run PQ searches — all datasets
 # ============================================================
 # No --datasets flag → all 12 (gist x4, video x4, audi x4).
-# --runs 1 : single pass. Change to 7 (1 warmup + 6 real) for averaged results.
+# --runs 7 : 1 warmup + 6 measured runs → averaged results for algorithm testing.
 # Datasets missing their index or PQ files are skipped, not failed.
 echo ""
 echo "=========================================="
 echo "Running GPU PQ searches (all datasets)..."
 echo "=========================================="
-bash scripts/run_searches.sh --mode gpu_pq --runs 1
+bash scripts/run_searches.sh --mode gpu_pq --runs 7
 
 echo ""
 echo "=========================================="
