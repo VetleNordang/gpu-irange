@@ -20,6 +20,8 @@ module load Anaconda3/2024.02-1
 
 CONDA_PYTHON=/cluster/home/vetlean/.conda/envs/irange/bin/python3
 
+# Aggregate the per-run CSVs into mean/std/CI95 first — the plotter reads aggregate/.
+"$CONDA_PYTHON" python/aggregate_results.py --all
 "$CONDA_PYTHON" python/plots/plot_gpu_vs_cpu.py --env idun
 
 echo "Plot job done: $(date)"

@@ -34,6 +34,18 @@ DATASETS = [
 
 TARGET_SUFFIXES = ["2", "5", "8"]
 
+def read_gpu_label(results_dir):
+    """Read the GPU name written by run_searches.sh (run_meta.txt), preferring gpu_pq."""
+    for mode in ("gpu_pq", "gpu_normal"):
+        meta = results_dir / mode / "run_meta.txt"
+        if meta.is_file():
+            for line in meta.read_text().splitlines():
+                if line.startswith("gpu="):
+                    gpu = line[4:].strip()
+                    if gpu:
+                        return gpu
+    return None
+
 def read_csv_files(result_dir):
     if not result_dir.exists():
         return None
@@ -82,8 +94,13 @@ def get_series_by_suffix(df, suffix):
         return None
     return suffix_df.groupby('SearchEF').agg({'Recall': 'mean', 'QPS': 'mean'}).sort_index()
 
-def plot_methods_comparison(cpu_serial_df, cpu_parallel_df, gpu_normal_df, gpu_pq_df, dataset_name, output_dir, env_tag=None):
-    tag_label = f" [{env_tag.upper()}]" if env_tag else ""
+def plot_methods_comparison(cpu_serial_df, cpu_parallel_df, gpu_normal_df, gpu_pq_df, dataset_name, output_dir, env_tag=None, gpu_label=None):
+    label_parts = []
+    if env_tag:
+        label_parts.append(env_tag.upper())
+    if gpu_label:
+        label_parts.append(gpu_label)
+    tag_label = f"  [{'  ·  '.join(label_parts)}]" if label_parts else ""
     tag_suffix = f"_{env_tag}" if env_tag else ""
 
     methods = {
@@ -231,6 +248,8 @@ def main():
         output_dir = dataset_dir / "results" / "analysis"
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        gpu_label = read_gpu_label(dataset_dir / "results")
+
         cpu_serial_df   = read_csv_files(dataset_dir / "results" / "cpu_serial")
         cpu_parallel_df = read_csv_files(dataset_dir / "results" / "cpu_parallel")
         gpu_normal_df   = read_csv_files(dataset_dir / "results" / "gpu_normal")
@@ -251,7 +270,7 @@ def main():
 
         try:
             plot_methods_comparison(cpu_serial_df, cpu_parallel_df, gpu_normal_df, gpu_pq_df,
-                                    dataset['name'], output_dir, env_tag=args.env)
+                                    dataset['name'], output_dir, env_tag=args.env, gpu_label=gpu_label)
             success_count += 1
         except Exception as e:
             print(f"  ✗ Failed to create plots: {e}")

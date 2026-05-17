@@ -238,6 +238,7 @@ run_gpu_normal() {
     local any_failed=0
     local t_start=$SECONDS
 
+    write_run_meta "$base_dir"
     nvidia-smi --query-gpu=name,memory.free,memory.used,memory.total --format=csv,noheader 2>/dev/null || true
 
     for (( run=0; run<NUM_RUNS; run++ )); do
@@ -320,6 +321,7 @@ run_gpu_pq() {
     local any_failed=0
     local t_start=$SECONDS
 
+    write_run_meta "$base_dir"
     nvidia-smi --query-gpu=name,memory.free,memory.used,memory.total --format=csv,noheader 2>/dev/null || true
 
     for (( run=0; run<NUM_RUNS; run++ )); do
@@ -372,6 +374,20 @@ run_gpu_pq() {
         echo "✗ $key had failures ($(( SECONDS - t_start ))s)"
         FAILURES+=("$key")
     fi
+}
+
+# Write GPU/run metadata next to the results so the plotter can label charts.
+write_run_meta() {
+    local dir="$1"
+    mkdir -p "$dir"
+    {
+        if command -v nvidia-smi &>/dev/null; then
+            echo "gpu=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | xargs)"
+            echo "vram=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader 2>/dev/null | head -1 | xargs)"
+        fi
+        echo "host=$(hostname)"
+        echo "date=$(date +%Y-%m-%d)"
+    } > "$dir/run_meta.txt"
 }
 
 # ── Main loop ──────────────────────────────────────────────────────────────────
