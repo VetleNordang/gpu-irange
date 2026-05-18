@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     git \
     curl \
     wget \
+    rsync \
     build-essential \
     cmake \
     ninja-build \

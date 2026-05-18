@@ -1,287 +1,304 @@
 #!/usr/bin/env python3
 """
-Plot CPU vs GPU Normal vs GPU PQ performance comparison for iRange search.
-Generates QPS comparison plots and Recall-QPS tradeoff plots for each dataset.
-Only includes data ranges for mixed 2, 5, and 8.
+Plot CPU vs GPU performance comparison for iRangeGraph range-filtered search.
+
+For each dataset it writes three figures into the dataset's results/analysis/
+folder:
+
+  qps_methods_comparison[_env].png       QPS vs SearchEF, one panel per range
+  tradeoff_methods_comparison[_env].png  QPS vs Recall,   one panel per range
+  speedup_comparison[_env].png           GPU-Normal / CPU-P speedup vs SearchEF
+
+With --summary it also writes one cross-size scale figure per dataset family
+(QPS vs number of vectors at a fixed SearchEF).
+
+Every curve is the MEAN over the benchmark runs found in run1..runN, with the
+warm-up run excluded, matching the methodology described in the thesis. Where
+more than one run is present a shaded band shows the run-to-run min/max.
+
+The GPU model is deliberately NOT drawn on the figures. State the hardware in
+the LaTeX caption instead, so the same plot cannot disagree with the text.
 """
 
-import os
-import re
 import argparse
-import pandas as pd
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import glob
+import re
 from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent / "executable_data"
 
 DATASETS = [
-    {"key": "gist250k",  "name": "GIST 250k",              "path": "gist1m/250k"},
-    {"key": "gist500k",  "name": "GIST 500k",              "path": "gist1m/500k"},
-    {"key": "gist750k",  "name": "GIST 750k",              "path": "gist1m/750k"},
-    {"key": "gist1000k", "name": "GIST 1000k",             "path": "gist1m/1000k"},
-    {"key": "video1m",  "name": "Video 1M (YouTube RGB)", "path": "video/1m"},
-    {"key": "video2m",  "name": "Video 2M (YouTube RGB)", "path": "video/2m"},
-    {"key": "video4m",  "name": "Video 4M (YouTube RGB)", "path": "video/4m"},
-    {"key": "video8m",  "name": "Video 8M (YouTube RGB)", "path": "video/8m"},
-    {"key": "audi1m",   "name": "Audi 1M",                "path": "audi/1m"},
-    {"key": "audi2m",   "name": "Audi 2M",                "path": "audi/2m"},
-    {"key": "audi4m",   "name": "Audi 4M",                "path": "audi/4m"},
-    {"key": "audi8m",   "name": "Audi 8M",                "path": "audi/8m"},
+    {"key": "gist250k",  "name": "GIST1M 250k",      "family": "gist",  "size": 250_000,   "path": "gist1m/250k"},
+    {"key": "gist500k",  "name": "GIST1M 500k",      "family": "gist",  "size": 500_000,   "path": "gist1m/500k"},
+    {"key": "gist750k",  "name": "GIST1M 750k",      "family": "gist",  "size": 750_000,   "path": "gist1m/750k"},
+    {"key": "gist1000k", "name": "GIST1M 1M",        "family": "gist",  "size": 1_000_000, "path": "gist1m/1000k"},
+    {"key": "video1m",   "name": "YouTube Video 1M", "family": "video", "size": 1_000_000, "path": "video/1m"},
+    {"key": "video2m",   "name": "YouTube Video 2M", "family": "video", "size": 2_000_000, "path": "video/2m"},
+    {"key": "video4m",   "name": "YouTube Video 4M", "family": "video", "size": 4_000_000, "path": "video/4m"},
+    {"key": "video8m",   "name": "YouTube Video 8M", "family": "video", "size": 8_000_000, "path": "video/8m"},
+    {"key": "audi1m",    "name": "YouTube Audio 1M", "family": "audi",  "size": 1_000_000, "path": "audi/1m"},
+    {"key": "audi2m",    "name": "YouTube Audio 2M", "family": "audi",  "size": 2_000_000, "path": "audi/2m"},
+    {"key": "audi4m",    "name": "YouTube Audio 4M", "family": "audi",  "size": 4_000_000, "path": "audi/4m"},
+    {"key": "audi8m",    "name": "YouTube Audio 8M", "family": "audi",  "size": 8_000_000, "path": "audi/8m"},
 ]
 
-TARGET_SUFFIXES = ["2", "5", "8"]
+METHODS = [
+    {"key": "cpu_serial",   "label": "CPU-S",      "color": "tab:gray",   "default": False},
+    {"key": "cpu_parallel", "label": "CPU-P",      "color": "tab:blue",   "default": True},
+    {"key": "gpu_normal",   "label": "GPU Normal", "color": "tab:orange", "default": True},
+    {"key": "gpu_pq",       "label": "GPU PQ",     "color": "tab:green",  "default": True},
+]
 
-def read_gpu_label(results_dir):
-    """Read the GPU name written by run_searches.sh (run_meta.txt), preferring gpu_pq."""
-    for mode in ("gpu_pq", "gpu_normal"):
-        meta = results_dir / mode / "run_meta.txt"
-        if meta.is_file():
-            for line in meta.read_text().splitlines():
-                if line.startswith("gpu="):
-                    gpu = line[4:].strip()
-                    if gpu:
-                        return gpu
-    return None
+RANGES = [2, 5, 8]
+RANGE_LABEL = {2: "wide", 5: "medium", 8: "narrow"}
+RANGE_MARKER = {2: "o", 5: "s", 8: "^"}
+COLUMNS = ["SearchEF", "Recall", "QPS", "DCO", "HOP"]
 
-def read_csv_files(result_dir):
-    if not result_dir.exists():
+
+# ── data loading ────────────────────────────────────────────────────────────
+
+def parse_range(filename):
+    """Range index from results2.csv / results_gpu2_gpu.csv / results_pq2_gpu.csv."""
+    m = re.search(r"(\d+)(?:_gpu)?\.csv$", filename)
+    return int(m.group(1)) if m else None
+
+
+def read_csv(path):
+    """Read one result CSV, with or without a header row."""
+    with open(path) as fh:
+        has_header = fh.readline().startswith("SearchEF")
+    df = pd.read_csv(path) if has_header else pd.read_csv(path, names=COLUMNS)
+    if not {"SearchEF", "Recall", "QPS"}.issubset(df.columns):
         return None
+    df = df[["SearchEF", "Recall", "QPS"]].apply(pd.to_numeric, errors="coerce")
+    return df.dropna()
 
-    # Prefer aggregate/ subdirectory (statistically correct mean across runs).
-    # Fall back to raw CSVs in result_dir itself (e.g. cpu_serial which has no run dirs).
-    aggregate_dir = result_dir / "aggregate"
-    read_dir = aggregate_dir if aggregate_dir.is_dir() else result_dir
-    is_aggregate = aggregate_dir.is_dir()
 
-    csv_files = sorted(glob.glob(os.path.join(read_dir, "*.csv")))
-    if not csv_files:
+def load_method(method_dir):
+    """Mean QPS/Recall per (range, SearchEF) across runs. Warm-up is excluded.
+
+    Reads run1..runN subdirectories when present (the authoritative layout) and
+    falls back to flat CSVs in method_dir for methods that have no run dirs.
+    """
+    if not method_dir.is_dir():
         return None
-
-    dfs = []
-    for csv_file in csv_files:
-        try:
-            df = pd.read_csv(csv_file)
-            if 'SearchEF' not in df.columns:
-                df = pd.read_csv(csv_file, names=['SearchEF', 'Recall', 'QPS', 'DCO', 'HOP'])
-
-            # Aggregate CSVs use Recall_mean / QPS_mean — normalise to Recall / QPS.
-            if is_aggregate:
-                rename = {c: c.replace('_mean', '') for c in df.columns if c.endswith('_mean')}
-                df = df.rename(columns=rename)
-
-            match = re.search(r'(\d+)(?:_gpu)?\.csv$', os.path.basename(csv_file))
-            if match:
-                suffix = match.group(1)
-                if suffix in TARGET_SUFFIXES:
-                    df['Suffix'] = suffix
-                    dfs.append(df)
-        except Exception as e:
-            print(f"  Warning: Failed to read {csv_file}: {e}")
-
-    if not dfs:
-        return None
-
-    return pd.concat(dfs, ignore_index=True)
-
-def get_series_by_suffix(df, suffix):
-    if df is None:
-        return None
-    suffix_df = df[df['Suffix'] == suffix]
-    if suffix_df.empty:
-        return None
-    return suffix_df.groupby('SearchEF').agg({'Recall': 'mean', 'QPS': 'mean'}).sort_index()
-
-def plot_methods_comparison(cpu_serial_df, cpu_parallel_df, gpu_normal_df, gpu_pq_df, dataset_name, output_dir, env_tag=None, gpu_label=None):
-    label_parts = []
-    if env_tag:
-        label_parts.append(env_tag.upper())
-    if gpu_label:
-        label_parts.append(gpu_label)
-    tag_label = f"  [{'  ·  '.join(label_parts)}]" if label_parts else ""
-    tag_suffix = f"_{env_tag}" if env_tag else ""
-
-    methods = {
-        "CPU Serial":   {"df": cpu_serial_df,   "color": "tab:gray"},
-        "CPU Parallel": {"df": cpu_parallel_df, "color": "tab:blue"},
-        "GPU (Normal)": {"df": gpu_normal_df,   "color": "tab:orange"},
-        "GPU (PQ)":     {"df": gpu_pq_df,       "color": "tab:green"},
-    }
-    suffix_markers = {"2": "o", "5": "s", "8": "^"}
-
-    # ── Plot 1: Recall vs QPS ────────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(10, 8))
-    plotted_any = False
-    for method_name, method_data in methods.items():
-        df = method_data["df"]
-        if df is None:
-            continue
-        for suffix in TARGET_SUFFIXES:
-            series = get_series_by_suffix(df, suffix)
-            if series is None:
+    run_dirs = sorted(d for d in method_dir.glob("run*") if d.is_dir())
+    sources = run_dirs if run_dirs else [method_dir]
+    frames = []
+    for run_idx, src in enumerate(sources):
+        for csv in sorted(src.glob("*.csv")):
+            rng = parse_range(csv.name)
+            if rng not in RANGES:
                 continue
-            ax.plot(series['Recall'], series['QPS'],
-                    marker=suffix_markers[suffix], linestyle='-',
-                    color=method_data["color"], label=f'{method_name} - Range {suffix}',
-                    linewidth=2, markersize=8, alpha=0.8)
-            plotted_any = True
-
-    if not plotted_any:
-        print(f"  Warning: No data to plot tradeoff for {dataset_name}")
-        plt.close()
-    else:
-        ax.set_ylabel('QPS (Queries Per Second)', fontsize=12)
-        ax.set_xlabel('Recall', fontsize=12)
-        ax.set_title(f'{dataset_name}: Recall vs QPS Tradeoff (Ranges 2, 5, 8){tag_label}',
-                     fontsize=14, fontweight='bold')
-        ax.legend(fontsize=10, bbox_to_anchor=(1.05, 1), loc='upper left')
-        ax.grid(True, alpha=0.3)
-        ax.set_yscale('log')
-        plt.tight_layout()
-        out = output_dir / f"tradeoff_methods_comparison{tag_suffix}.png"
-        plt.savefig(out, dpi=150, bbox_inches='tight')
-        plt.close()
-        print(f"  ✓ Saved: {out}")
-
-    # ── Plot 2: SearchEF vs QPS ──────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(10, 8))
-    plotted_any = False
-    for method_name, method_data in methods.items():
-        df = method_data["df"]
-        if df is None:
-            continue
-        for suffix in TARGET_SUFFIXES:
-            series = get_series_by_suffix(df, suffix)
-            if series is None:
+            df = read_csv(csv)
+            if df is None or df.empty:
                 continue
-            ax.plot(series.index, series['QPS'],
-                    marker=suffix_markers[suffix], linestyle='--',
-                    color=method_data["color"], label=f'{method_name} - Range {suffix}',
-                    linewidth=2, markersize=8, alpha=0.8)
-            plotted_any = True
+            frames.append(df.assign(range=rng, run=run_idx))
+    if not frames:
+        return None
+    raw = pd.concat(frames, ignore_index=True)
+    return (raw.groupby(["range", "SearchEF"], as_index=False)
+               .agg(Recall=("Recall", "mean"),
+                    QPS=("QPS", "mean"),
+                    QPS_min=("QPS", "min"),
+                    QPS_max=("QPS", "max"),
+                    n_runs=("QPS", "size")))
 
-    if not plotted_any:
-        print(f"  Warning: No data to plot QPS for {dataset_name}")
-        plt.close()
-    else:
-        ax.set_xlabel('SearchEF', fontsize=12)
-        ax.set_ylabel('QPS (Queries Per Second)', fontsize=12)
-        ax.set_title(f'{dataset_name}: SearchEF vs QPS (Ranges 2, 5, 8){tag_label}',
-                     fontsize=14, fontweight='bold')
-        ax.legend(fontsize=10, bbox_to_anchor=(1.05, 1), loc='upper left')
-        ax.grid(True, alpha=0.3)
-        ax.set_xscale('log')
-        ax.set_yscale('log')
-        plt.tight_layout()
-        out = output_dir / f"qps_methods_comparison{tag_suffix}.png"
-        plt.savefig(out, dpi=150, bbox_inches='tight')
-        plt.close()
-        print(f"  ✓ Saved: {out}")
 
-    # ── Plot 3: GPU Normal speedup over CPU Parallel ─────────────────────────
-    fig, ax = plt.subplots(figsize=(10, 8))
-    plotted_any = False
-    if cpu_parallel_df is not None and gpu_normal_df is not None:
-        for suffix in TARGET_SUFFIXES:
-            cpu_series = get_series_by_suffix(cpu_parallel_df, suffix)
-            gpu_series = get_series_by_suffix(gpu_normal_df, suffix)
-            if cpu_series is not None and gpu_series is not None:
-                common_efs = cpu_series.index.intersection(gpu_series.index)
-                if not common_efs.empty:
-                    speedup = gpu_series.loc[common_efs, 'QPS'] / cpu_series.loc[common_efs, 'QPS']
-                    ax.plot(common_efs, speedup,
-                            marker=suffix_markers[suffix], linestyle='-',
-                            color="tab:red", label=f'Speedup - Range {suffix}',
-                            linewidth=2, markersize=8, alpha=0.8)
-                    plotted_any = True
+def load_dataset(path):
+    """Return {method_key: aggregated dataframe} for one dataset."""
+    results = BASE_DIR / path / "results"
+    return {m["key"]: load_method(results / m["key"]) for m in METHODS}
 
-    if not plotted_any:
-        print(f"  Warning: No data to plot Speedup for {dataset_name}")
-        plt.close()
-    else:
-        ax.set_xlabel('SearchEF', fontsize=12)
-        ax.set_ylabel('Speedup (GPU Normal QPS / CPU Parallel QPS)', fontsize=12)
-        ax.set_title(f'{dataset_name}: GPU Normal Speedup over CPU Parallel (Ranges 2, 5, 8){tag_label}',
-                     fontsize=14, fontweight='bold')
-        ax.legend(fontsize=10, bbox_to_anchor=(1.05, 1), loc='upper left')
-        ax.grid(True, alpha=0.3)
-        ax.set_xscale('log')
-        plt.tight_layout()
-        out = output_dir / f"speedup_comparison{tag_suffix}.png"
-        plt.savefig(out, dpi=150, bbox_inches='tight')
-        plt.close()
-        print(f"  ✓ Saved: {out}")
+
+# ── plotting ────────────────────────────────────────────────────────────────
+
+def _save(fig, out_path):
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  saved {out_path.relative_to(BASE_DIR)}")
+
+
+def plot_faceted(name, data, methods, kind, out_path, title):
+    """kind 'qps' -> QPS vs SearchEF; kind 'tradeoff' -> QPS vs Recall."""
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.8), sharey=True)
+    handles, labels = [], []
+    drew = False
+    for ax, rng in zip(axes, RANGES):
+        for m in methods:
+            agg = data.get(m["key"])
+            if agg is None:
+                continue
+            sub = agg[agg["range"] == rng]
+            if sub.empty:
+                continue
+            sub = sub.sort_values("SearchEF" if kind == "qps" else "Recall")
+            x = sub["SearchEF"] if kind == "qps" else sub["Recall"]
+            line, = ax.plot(x, sub["QPS"], marker="o", ms=4, lw=1.8,
+                            color=m["color"], label=m["label"])
+            ax.fill_between(x, sub["QPS_min"], sub["QPS_max"],
+                            color=m["color"], alpha=0.15, linewidth=0)
+            drew = True
+            if m["label"] not in labels:
+                handles.append(line)
+                labels.append(m["label"])
+        ax.set_yscale("log")
+        ax.grid(True, which="both", alpha=0.3)
+        ax.set_title(f"Range {rng} ({RANGE_LABEL[rng]})", fontsize=11)
+        if kind == "qps":
+            ax.set_xscale("log")
+            ax.set_xlabel("SearchEF")
+        else:
+            ax.set_xlabel("Recall@10")
+    if not drew:
+        plt.close(fig)
+        print(f"  skip {out_path.name}: no data")
+        return
+    axes[0].set_ylabel("QPS (queries per second)")
+    fig.legend(handles, labels, loc="lower center", ncol=len(labels),
+               bbox_to_anchor=(0.5, -0.04), frameon=False)
+    if title:
+        fig.suptitle(name, fontsize=13, fontweight="bold")
+    fig.tight_layout()
+    _save(fig, out_path)
+
+
+def plot_speedup(name, data, out_path, title):
+    cpu = data.get("cpu_parallel")
+    gpu = data.get("gpu_normal")
+    if cpu is None or gpu is None:
+        print(f"  skip {out_path.name}: need cpu_parallel and gpu_normal")
+        return
+    fig, ax = plt.subplots(figsize=(8, 5.5))
+    drew = False
+    for rng in RANGES:
+        c = cpu[cpu["range"] == rng].set_index("SearchEF")["QPS"]
+        g = gpu[gpu["range"] == rng].set_index("SearchEF")["QPS"]
+        common = c.index.intersection(g.index)
+        if common.empty:
+            continue
+        s = (g.loc[common] / c.loc[common]).sort_index()
+        ax.plot(s.index, s.values, marker=RANGE_MARKER[rng], ms=5, lw=1.8,
+                color="tab:red", alpha=0.85,
+                label=f"Range {rng} ({RANGE_LABEL[rng]})")
+        drew = True
+    if not drew:
+        plt.close(fig)
+        print(f"  skip {out_path.name}: no overlapping data")
+        return
+    ax.axhline(1.0, color="black", lw=0.8, ls=":")
+    ax.set_xscale("log")
+    ax.set_xlabel("SearchEF")
+    ax.set_ylabel("Speedup  (GPU Normal QPS / CPU-P QPS)")
+    ax.grid(True, which="both", alpha=0.3)
+    ax.legend()
+    if title:
+        ax.set_title(f"{name}: GPU Normal speedup over CPU-P",
+                     fontsize=12, fontweight="bold")
+    fig.tight_layout()
+    _save(fig, out_path)
+
+
+def plot_summary(datasets, methods, env_suffix, title, ef_target, rng):
+    """One QPS-vs-size figure per dataset family at a fixed ef and range."""
+    families = {}
+    for d in datasets:
+        families.setdefault(d["family"], []).append(d)
+    for family, members in families.items():
+        members = sorted(members, key=lambda d: d["size"])
+        series = {m["key"]: ([], []) for m in methods}
+        for d in members:
+            data = load_dataset(d["path"])
+            for m in methods:
+                agg = data.get(m["key"])
+                if agg is None:
+                    continue
+                sub = agg[agg["range"] == rng]
+                if sub.empty:
+                    continue
+                row = sub.loc[(sub["SearchEF"] - ef_target).abs().idxmin()]
+                series[m["key"]][0].append(d["size"])
+                series[m["key"]][1].append(row["QPS"])
+        fig, ax = plt.subplots(figsize=(8, 5.5))
+        drew = False
+        for m in methods:
+            xs, ys = series[m["key"]]
+            if not xs:
+                continue
+            ax.plot(xs, ys, marker="o", ms=6, lw=1.8,
+                    color=m["color"], label=m["label"])
+            drew = True
+        if not drew:
+            plt.close(fig)
+            continue
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel("Dataset size (vectors)")
+        ax.set_ylabel(f"QPS (SearchEF near {ef_target}, Range {rng})")
+        ax.grid(True, which="both", alpha=0.3)
+        ax.legend()
+        if title:
+            ax.set_title(f"{family}: throughput vs dataset size",
+                         fontsize=12, fontweight="bold")
+        fig.tight_layout()
+        out_dir = BASE_DIR / Path(members[0]["path"]).parent / "results" / "analysis"
+        _save(fig, out_dir / f"scale_summary{env_suffix}.png")
+
+
+# ── main ────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Plot CPU vs GPU performance comparison")
-    parser.add_argument("--dataset", default=None,
-                        help="Dataset key prefix to plot (e.g. 'gist250k', 'video', 'audi_1m'). "
-                             "Omit to plot all datasets.")
-    parser.add_argument("--env", default=None,
-                        help="Environment tag added to filenames and plot titles (e.g. 'idun').")
-    args = parser.parse_args()
+    p = argparse.ArgumentParser(description="Plot CPU vs GPU performance comparison.")
+    p.add_argument("--dataset", default=None,
+                   help="Dataset key prefix to plot (e.g. 'gist', 'audi1m'). Omit for all.")
+    p.add_argument("--env", default=None,
+                   help="Environment tag added to output filenames (e.g. 'idun').")
+    p.add_argument("--cpu-serial", action="store_true",
+                   help="Also plot the single-threaded CPU baseline.")
+    p.add_argument("--title", action="store_true",
+                   help="Draw a title on each figure (off by default, use captions).")
+    p.add_argument("--summary", action="store_true",
+                   help="Also write one QPS-vs-size figure per dataset family.")
+    p.add_argument("--summary-ef", type=int, default=100,
+                   help="Target SearchEF for the summary figure (default 100).")
+    p.add_argument("--summary-range", type=int, default=5, choices=RANGES,
+                   help="Range used for the summary figure (default 5).")
+    args = p.parse_args()
 
-    print("=" * 60)
-    print("CPU vs GPU Normal vs GPU PQ Performance Comparison")
-    if args.env:
-        print(f"Environment: {args.env.upper()}")
-    print("=" * 60)
-    print()
+    methods = [m for m in METHODS if m["default"] or (args.cpu_serial and m["key"] == "cpu_serial")]
+    suffix = f"_{args.env}" if args.env else ""
 
+    datasets = DATASETS
     if args.dataset:
-        datasets_to_plot = [d for d in DATASETS if d['key'].startswith(args.dataset)]
-        if not datasets_to_plot:
-            print(f"Warning: no dataset matched prefix '{args.dataset}', plotting all.")
-            datasets_to_plot = DATASETS
-    else:
-        datasets_to_plot = DATASETS
+        datasets = [d for d in DATASETS if d["key"].startswith(args.dataset)]
+        if not datasets:
+            print(f"No dataset matched '{args.dataset}'.")
+            return
 
-    success_count = 0
-    failure_count = 0
-
-    for dataset in datasets_to_plot:
-        print(f"Processing: {dataset['name']}")
-
-        dataset_dir = BASE_DIR / dataset['path']
-        output_dir = dataset_dir / "results" / "analysis"
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        gpu_label = read_gpu_label(dataset_dir / "results")
-
-        cpu_serial_df   = read_csv_files(dataset_dir / "results" / "cpu_serial")
-        cpu_parallel_df = read_csv_files(dataset_dir / "results" / "cpu_parallel")
-        gpu_normal_df   = read_csv_files(dataset_dir / "results" / "gpu_normal")
-        gpu_pq_df       = read_csv_files(dataset_dir / "results" / "gpu_pq")
-
-        def count_unique(df):
-            return len(df['Suffix'].unique()) if df is not None else 0
-
-        print(f"  Found ranges: CPU_Serial={count_unique(cpu_serial_df)}, "
-              f"CPU_Parallel={count_unique(cpu_parallel_df)}, "
-              f"GPU_Normal={count_unique(gpu_normal_df)}, GPU_PQ={count_unique(gpu_pq_df)}")
-
-        if cpu_serial_df is None and cpu_parallel_df is None and gpu_normal_df is None and gpu_pq_df is None:
-            print("  ✗ No data found for any method.")
-            failure_count += 1
-            print()
+    for d in datasets:
+        print(f"{d['name']}")
+        data = load_dataset(d["path"])
+        if all(v is None for v in data.values()):
+            print("  no data found")
             continue
+        out = BASE_DIR / d["path"] / "results" / "analysis"
+        plot_faceted(d["name"], data, methods, "qps",
+                     out / f"qps_methods_comparison{suffix}.png", args.title)
+        plot_faceted(d["name"], data, methods, "tradeoff",
+                     out / f"tradeoff_methods_comparison{suffix}.png", args.title)
+        plot_speedup(d["name"], data,
+                     out / f"speedup_comparison{suffix}.png", args.title)
 
-        try:
-            plot_methods_comparison(cpu_serial_df, cpu_parallel_df, gpu_normal_df, gpu_pq_df,
-                                    dataset['name'], output_dir, env_tag=args.env, gpu_label=gpu_label)
-            success_count += 1
-        except Exception as e:
-            print(f"  ✗ Failed to create plots: {e}")
-            failure_count += 1
+    if args.summary:
+        print("Scale summary")
+        plot_summary(datasets, methods, suffix, args.title,
+                     args.summary_ef, args.summary_range)
 
-        print()
-
-    print("=" * 60)
-    print(f"Successfully plotted: {success_count} datasets")
-    print(f"Failed / no data:     {failure_count} datasets")
-    print("=" * 60)
 
 if __name__ == "__main__":
     main()
