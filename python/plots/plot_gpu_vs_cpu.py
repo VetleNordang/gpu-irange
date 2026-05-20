@@ -14,7 +14,12 @@ With --summary it also writes one cross-size scale figure per dataset family
 
 Every curve is the MEAN over the benchmark runs found in run1..runN, with the
 warm-up run excluded, matching the methodology described in the thesis. Where
-more than one run is present a shaded band shows the run-to-run min/max.
+more than one run is present a shaded band shows the 95% CI from aggregate_results.py.
+
+Data loading priority per method directory:
+  1. aggregate/*.csv  (produced by aggregate_results.py — authoritative)
+  2. Run aggregate_results.py automatically if aggregate/ is missing
+  3. Manual inline mean/min/max from raw run dirs (fallback, prints a warning)
 
 The GPU model is deliberately NOT drawn on the figures. State the hardware in
 the LaTeX caption instead, so the same plot cannot disagree with the text.
@@ -22,6 +27,8 @@ the LaTeX caption instead, so the same plot cannot disagree with the text.
 
 import argparse
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -78,14 +85,50 @@ def read_csv(path):
     return df.dropna()
 
 
-def load_method(method_dir):
-    """Mean QPS/Recall per (range, SearchEF) across runs. Warm-up is excluded.
+def _load_from_aggregate(method_dir):
+    """Load from aggregate/*.csv produced by aggregate_results.py.
 
-    Reads run1..runN subdirectories when present (the authoritative layout) and
-    falls back to flat CSVs in method_dir for methods that have no run dirs.
+    Returns a dataframe with columns (range, SearchEF, Recall, QPS, QPS_min, QPS_max, n_runs),
+    or None if the aggregate dir is absent or unusable.
     """
-    if not method_dir.is_dir():
+    agg_dir = method_dir / "aggregate"
+    if not agg_dir.is_dir():
         return None
+    frames = []
+    for csv in sorted(agg_dir.glob("*.csv")):
+        rng = parse_range(csv.name)
+        if rng not in RANGES:
+            continue
+        df = pd.read_csv(csv)
+        required = {"SearchEF", "Recall_mean", "QPS_mean", "QPS_ci95"}
+        if not required.issubset(df.columns):
+            continue
+        df = df.rename(columns={"Recall_mean": "Recall", "QPS_mean": "QPS"})
+        df["QPS_min"] = df["QPS"] - df["QPS_ci95"]
+        df["QPS_max"] = df["QPS"] + df["QPS_ci95"]
+        df["range"] = rng
+        frames.append(df[["range", "SearchEF", "Recall", "QPS", "QPS_min", "QPS_max", "n_runs"]])
+    return pd.concat(frames, ignore_index=True) if frames else None
+
+
+def _run_aggregate_script(method_dir):
+    """Try to run aggregate_results.py for method_dir. Returns True on success."""
+    script = Path(__file__).resolve().parent.parent / "aggregate_results.py"
+    if not script.exists():
+        return False
+    print(f"  [aggregate] running aggregate_results.py for {method_dir.relative_to(BASE_DIR)} ...")
+    result = subprocess.run(
+        [sys.executable, str(script), "--mode_dir", str(method_dir)],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"  [aggregate] FAILED:\n{result.stderr.strip()}")
+        return False
+    return True
+
+
+def _load_manual(method_dir):
+    """Inline mean/min/max from raw run dirs. Fallback only — prints a warning."""
     run_dirs = sorted(d for d in method_dir.glob("run*") if d.is_dir())
     sources = run_dirs if run_dirs else [method_dir]
     frames = []
@@ -100,6 +143,8 @@ def load_method(method_dir):
             frames.append(df.assign(range=rng, run=run_idx))
     if not frames:
         return None
+    print(f"  WARNING: using manual inline averaging for {method_dir.relative_to(BASE_DIR)}"
+          f" — bands show min/max, NOT 95% CI. Run aggregate_results.py for consistent statistics.")
     raw = pd.concat(frames, ignore_index=True)
     return (raw.groupby(["range", "SearchEF"], as_index=False)
                .agg(Recall=("Recall", "mean"),
@@ -107,6 +152,29 @@ def load_method(method_dir):
                     QPS_min=("QPS", "min"),
                     QPS_max=("QPS", "max"),
                     n_runs=("QPS", "size")))
+
+
+def load_method(method_dir):
+    """Load aggregated results for one method directory.
+
+    Priority:
+      1. aggregate/*.csv  (from aggregate_results.py — 95% CI bands)
+      2. Auto-run aggregate_results.py, then retry step 1
+      3. Manual inline mean/min/max (fallback, warns the user)
+    """
+    if not method_dir.is_dir():
+        return None
+
+    df = _load_from_aggregate(method_dir)
+    if df is not None:
+        return df
+
+    if _run_aggregate_script(method_dir):
+        df = _load_from_aggregate(method_dir)
+        if df is not None:
+            return df
+
+    return _load_manual(method_dir)
 
 
 def load_dataset(path):
@@ -124,7 +192,7 @@ def _save(fig, out_path):
     print(f"  saved {out_path.relative_to(BASE_DIR)}")
 
 
-def plot_faceted(name, data, methods, kind, out_path, title):
+def plot_faceted(name, data, methods, kind, out_path, title, hw_label=""):
     """kind 'qps' -> QPS vs SearchEF; kind 'tradeoff' -> QPS vs Recall."""
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.8), sharey=True)
     handles, labels = [], []
@@ -163,12 +231,13 @@ def plot_faceted(name, data, methods, kind, out_path, title):
     fig.legend(handles, labels, loc="lower center", ncol=len(labels),
                bbox_to_anchor=(0.5, -0.04), frameon=False)
     if title:
-        fig.suptitle(name, fontsize=13, fontweight="bold")
+        t = f"{name} — {hw_label}" if hw_label else name
+        fig.suptitle(t, fontsize=13, fontweight="bold")
     fig.tight_layout()
     _save(fig, out_path)
 
 
-def plot_speedup(name, data, out_path, title):
+def plot_speedup(name, data, out_path, title, hw_label=""):
     cpu = data.get("cpu_parallel")
     gpu = data.get("gpu_normal")
     if cpu is None or gpu is None:
@@ -198,13 +267,13 @@ def plot_speedup(name, data, out_path, title):
     ax.grid(True, which="both", alpha=0.3)
     ax.legend()
     if title:
-        ax.set_title(f"{name}: GPU Normal speedup over CPU-P",
-                     fontsize=12, fontweight="bold")
+        t = f"{name} — {hw_label}: GPU Normal speedup over CPU-P" if hw_label else f"{name}: GPU Normal speedup over CPU-P"
+        ax.set_title(t, fontsize=12, fontweight="bold")
     fig.tight_layout()
     _save(fig, out_path)
 
 
-def plot_summary(datasets, methods, env_suffix, title, ef_target, rng):
+def plot_summary(datasets, methods, env_suffix, title, ef_target, rng, hw_label=""):
     """One QPS-vs-size figure per dataset family at a fixed ef and range."""
     families = {}
     for d in datasets:
@@ -243,8 +312,8 @@ def plot_summary(datasets, methods, env_suffix, title, ef_target, rng):
         ax.grid(True, which="both", alpha=0.3)
         ax.legend()
         if title:
-            ax.set_title(f"{family}: throughput vs dataset size",
-                         fontsize=12, fontweight="bold")
+            t = f"{family} — {hw_label}: throughput vs dataset size" if hw_label else f"{family}: throughput vs dataset size"
+            ax.set_title(t, fontsize=12, fontweight="bold")
         fig.tight_layout()
         out_dir = BASE_DIR / Path(members[0]["path"]).parent / "results" / "analysis"
         _save(fig, out_dir / f"scale_summary{env_suffix}.png")
@@ -262,6 +331,8 @@ def main():
                    help="Also plot the single-threaded CPU baseline.")
     p.add_argument("--title", action="store_true",
                    help="Draw a title on each figure (off by default, use captions).")
+    p.add_argument("--hardware", default="",
+                   help="Hardware label appended to figure titles, e.g. 'Tesla P100 12GB'.")
     p.add_argument("--summary", action="store_true",
                    help="Also write one QPS-vs-size figure per dataset family.")
     p.add_argument("--summary-ef", type=int, default=100,
@@ -288,16 +359,16 @@ def main():
             continue
         out = BASE_DIR / d["path"] / "results" / "analysis"
         plot_faceted(d["name"], data, methods, "qps",
-                     out / f"qps_methods_comparison{suffix}.png", args.title)
+                     out / f"qps_methods_comparison{suffix}.png", args.title, args.hardware)
         plot_faceted(d["name"], data, methods, "tradeoff",
-                     out / f"tradeoff_methods_comparison{suffix}.png", args.title)
+                     out / f"tradeoff_methods_comparison{suffix}.png", args.title, args.hardware)
         plot_speedup(d["name"], data,
-                     out / f"speedup_comparison{suffix}.png", args.title)
+                     out / f"speedup_comparison{suffix}.png", args.title, args.hardware)
 
     if args.summary:
         print("Scale summary")
         plot_summary(datasets, methods, suffix, args.title,
-                     args.summary_ef, args.summary_range)
+                     args.summary_ef, args.summary_range, args.hardware)
 
 
 if __name__ == "__main__":

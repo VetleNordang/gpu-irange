@@ -31,7 +31,8 @@ RUN pip3 install --no-cache-dir \
     tensorflow \
     numpy \
     pandas \
-    matplotlib
+    matplotlib \
+    scipy
 
 RUN useradd -m -s /bin/bash -u 904 vetlean \
     && echo 'vetlean ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
