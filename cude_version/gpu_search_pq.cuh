@@ -74,7 +74,8 @@ __global__ void irange_search_kernel_pq(
     int* d_hops,
     int* d_dist_comps,
     size_t size_links_per_layer,
-    unsigned long long seed
+    unsigned long long seed,
+    HeapNode* d_heap_buf   // [query_nb * 2 * MAX_SEARCH_EF] — candidate then top-candidates per query
 ) {
     // --- Thread identity ---
     const int lane_id           = threadIdx.x % THREADS_PER_QUERY;
@@ -109,9 +110,9 @@ __global__ void irange_search_kernel_pq(
 
     __syncthreads();  // all threads must finish building the table before any thread reads it
 
-    // --- Heap storage (lane 0 only) ---
-    HeapNode candidate_buffer    [MAX_SEARCH_EF];
-    HeapNode top_candidate_buffer[MAX_SEARCH_EF];
+    // --- Heap storage (lane 0 only) — lives in global memory to avoid 32 KB thread-stack usage ---
+    HeapNode* candidate_buffer     = d_heap_buf + (long long)query_id * 2 * MAX_SEARCH_EF;
+    HeapNode* top_candidate_buffer = candidate_buffer + MAX_SEARCH_EF;
     MinHeap  candidate_set;
     MaxHeap  top_candidates;
     float    lowerBound     = FLT_MAX;

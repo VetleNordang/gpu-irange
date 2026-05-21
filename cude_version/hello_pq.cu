@@ -387,9 +387,10 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     int max_elements = index.max_elements_;
     int dim          = index.storage->Dim;
 
-    // Batch size: limits visited array to batch_size * max_elements * 2 bytes.
-    // 100 queries * 2M nodes * 2 bytes = 400 MB instead of 4 GB for 1000 queries.
-    const int BATCH_SIZE = 100;
+    // BATCH_SIZE = query_nb runs all queries in one launch (full GPU parallelism).
+    // Lower this (e.g. 100) for datasets where visited array alone exceeds VRAM
+    // (visited = BATCH_SIZE * max_elements * 2 bytes; 8M dataset needs ~16 GB at full batch).
+    const int BATCH_SIZE = query_nb;
 
     // Allocate ADC distance table buffer: one flat table per query.
     // Each table is pq_M * pq_ksub floats. Allocated once, reused across all ef values and suffixes.
@@ -429,6 +430,24 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             cudaEventCreate(&stop);
             cudaEventRecord(start);
 
+            // Allocate global-memory heap buffers for this batch.
+            // Two HeapNode arrays per query (candidate + top-candidates), each MAX_SEARCH_EF entries.
+            // This replaces the 32 KB per-thread stack frame: 128 threads × batch_size blocks →
+            // just batch_size × 2 × MAX_SEARCH_EF × 8 bytes (e.g. 100 × 2 × 2000 × 8 = 3.2 MB).
+            HeapNode* d_heap_buf = nullptr;
+            {
+                size_t heap_bytes = (size_t)BATCH_SIZE * 2 * MAX_SEARCH_EF * sizeof(HeapNode);
+                cudaError_t err = cudaMalloc(&d_heap_buf, heap_bytes);
+                if (err != cudaSuccess) {
+                    printf("Failed to allocate heap buffer: %s\n", cudaGetErrorString(err));
+                    cudaEventDestroy(start);
+                    cudaEventDestroy(stop);
+                    cudaFree(d_hops);
+                    cudaFree(d_dist_comps);
+                    return;
+                }
+            }
+
             // Process queries in batches to bound visited-array VRAM usage.
             for (int batch_start = 0; batch_start < query_nb; batch_start += BATCH_SIZE) {
                 int batch_size = std::min(BATCH_SIZE, query_nb - batch_start);
@@ -437,6 +456,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
                 cudaError_t err = initGPUVisitedArray(visited, batch_size, max_elements);
                 if (err != cudaSuccess) {
                     printf("Failed to initialize visited array: %s\n", cudaGetErrorString(err));
+                    cudaFree(d_heap_buf);
                     cudaEventDestroy(start);
                     cudaEventDestroy(stop);
                     cudaFree(d_hops);
@@ -458,7 +478,8 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
                 irange_search_kernel_pq<<<num_blocks, threads_per_block>>>(
                     batch_gpu_index, visited, batch_size, ef, query_K, dim, suffix_idx,
                     d_hops + batch_start, d_dist_comps + batch_start,
-                    index.size_links_per_layer_, kernel_seed
+                    index.size_links_per_layer_, kernel_seed,
+                    d_heap_buf
                 );
 
                 cudaDeviceSynchronize();
@@ -469,6 +490,8 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
 
                 freeGPUVisitedArray(visited);
             }
+
+            cudaFree(d_heap_buf);
 
             cudaEventRecord(stop);
             cudaEventSynchronize(stop);

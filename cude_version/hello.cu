@@ -19,7 +19,7 @@
 #include "gpu_search_updated.cuh"
 
 
-const int query_K = 10;
+const int query_K = 100;
 int M;
 
 using std::cout;
@@ -284,18 +284,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
         int suffix = range.first;
         std::cout << "suffix" << suffix << std::endl;
 
-        std::string savepath = saveprefix + std::to_string(suffix) + "_gpu.csv";
-        CheckPath(savepath);
-        std::ofstream outfile(savepath);
-        if (!outfile.is_open()) {
-            printf("✗ Failed to open %s — results for suffix %d will not be saved\n", savepath.c_str(), suffix);
-        } else {
-            outfile << std::fixed << std::setprecision(6);
-            outfile << "SearchEF,Recall,QPS,DCO,HOP,VRAM_MB,PeakVRAM_MB\n";
-            outfile.flush();
-        }
-
-        // Pre-compute entry points on CPU once per suffix (shared across all EF values)
+        // Pre-compute entry points on CPU once per suffix (shared across all EF and K values)
         {
             int query_nb = index.storage->query_nb;
             const int MAX_EP = 100;
@@ -336,6 +325,17 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             delete[] h_entry_ids;
             delete[] h_entry_dists;
             delete[] h_entry_counts;
+        }
+
+        std::string savepath = saveprefix + std::to_string(suffix) + "_gpu.csv";
+        CheckPath(savepath);
+        std::ofstream outfile(savepath);
+        if (!outfile.is_open()) {
+            printf("✗ Failed to open %s — results for suffix %d will not be saved\n", savepath.c_str(), suffix);
+        } else {
+            outfile << std::fixed << std::setprecision(6);
+            outfile << "SearchEF,Recall@10,Recall@50,Recall@100,QPS,DCO,HOP,VRAM_MB,PeakVRAM_MB\n";
+            outfile.flush();
         }
 
         for (int ef : SearchEF) {
@@ -436,23 +436,32 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             cudaMemcpy(cpu_hops, d_hops, query_nb * sizeof(int), cudaMemcpyDeviceToHost);
             cudaMemcpy(cpu_dist_comps, d_dist_comps, query_nb * sizeof(int), cudaMemcpyDeviceToHost);
             
-            // Compute per-query mean recall
-            float recall = 0.0f;
+            // Compute recall@10, @50, @100 in one pass
+            float recall10 = 0.0f, recall50 = 0.0f, recall100 = 0.0f;
             if (index.storage->groundtruth.count(suffix)) {
                 auto &gt = index.storage->groundtruth[suffix];
                 for (int i = 0; i < query_nb; i++) {
-                    int gt_size = std::min((int)gt[i].size(), query_K);
-                    if (gt_size == 0) continue;
-                    int query_tp = 0;
+                    int tp10 = 0, tp50 = 0, tp100 = 0;
                     for (int k = 0; k < query_K; k++) {
                         int result_id = cpu_results[i * query_K + k];
-                        if (result_id != -1 &&
-                            std::find(gt[i].begin(), gt[i].end(), result_id) != gt[i].end())
-                            query_tp++;
+                        if (result_id == -1) continue;
+                        bool in_gt = std::find(gt[i].begin(), gt[i].end(), result_id) != gt[i].end();
+                        if (in_gt) {
+                            if (k < 10)  tp10++;
+                            if (k < 50)  tp50++;
+                            tp100++;
+                        }
                     }
-                    recall += (float)query_tp / gt_size;
+                    int gt10  = std::min((int)gt[i].size(), 10);
+                    int gt50  = std::min((int)gt[i].size(), 50);
+                    int gt100 = std::min((int)gt[i].size(), 100);
+                    if (gt10  > 0) recall10  += (float)tp10  / gt10;
+                    if (gt50  > 0) recall50  += (float)tp50  / gt50;
+                    if (gt100 > 0) recall100 += (float)tp100 / gt100;
                 }
-                recall /= query_nb;
+                recall10  /= query_nb;
+                recall50  /= query_nb;
+                recall100 /= query_nb;
             }
 
             // Calculate metrics
@@ -470,7 +479,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             
             // Write result row immediately
             if (outfile.is_open()) {
-                outfile << ef << "," << recall << "," << qps << "," << avg_dco << "," << avg_hops << "," << vram_used_mb << "," << peak_vram_mb << "\n";
+                outfile << ef << "," << recall10 << "," << recall50 << "," << recall100 << "," << qps << "," << avg_dco << "," << avg_hops << "," << vram_used_mb << "," << peak_vram_mb << "\n";
                 outfile.flush();
             }
             
@@ -578,7 +587,7 @@ int main(int argc, char **argv) {
     std::cout << "Loading queries..." << std::endl;
     storage.LoadQuery(paths["query_vector"]);
     // If it is the first run, Generate shall be called; otherwise, Generate can be skipped
-    // Generate(storage);
+    Generate(storage);
     std::cout << "Loading query ranges..." << std::endl;
     storage.LoadQueryRange(paths["range_saveprefix"]);
     std::cout << "Loading ground truth..." << std::endl;
