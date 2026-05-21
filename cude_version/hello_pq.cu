@@ -328,34 +328,35 @@ void load_pq_codes_to_gpu(GPUIndex &gpu_index, const std::vector<uint8_t>& pq_co
     }
 }
 
-void write_results_to_csv(const std::string& saveprefix, int suffix, 
-                          const std::vector<std::tuple<int, float, float, float, float>>& results) {
+void write_results_to_csv(const std::string& saveprefix, int suffix,
+                          const std::vector<std::tuple<int, float, float, float, float, size_t, size_t>>& results,
+                          int pq_M, int pq_nbits) {
     std::string savepath = saveprefix + std::to_string(suffix) + "_gpu.csv";
     CheckPath(savepath);
     std::ofstream outfile(savepath);
-    
+
     if (outfile.is_open()) {
-        // Write header
-        outfile << "SearchEF,Recall,QPS,DCO,HOP\n";
-        
-        // Write all results for this suffix
+        outfile << "SearchEF,Recall,QPS,DCO,HOP,VRAM_MB,PeakVRAM_MB,PQ_M,PQ_nbits\n";
+
         for (const auto& result : results) {
-            int ef = std::get<0>(result);
-            float recall = std::get<1>(result);
-            float qps = std::get<2>(result);
-            float dco = std::get<3>(result);
-            float hop = std::get<4>(result);
-            
-            outfile << ef << "," << recall << "," << qps << "," << dco << "," << hop << "\n";
+            outfile << std::get<0>(result) << ","
+                    << std::get<1>(result) << ","
+                    << std::get<2>(result) << ","
+                    << std::get<3>(result) << ","
+                    << std::get<4>(result) << ","
+                    << std::get<5>(result) << ","
+                    << std::get<6>(result) << ","
+                    << pq_M << ","
+                    << pq_nbits << "\n";
         }
-        
+
         outfile.close();
     } else {
         printf("ERROR: failed to open %s\n", savepath.c_str());
     }
 }
 
-void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<int> SearchEF, std::string saveprefix, 
+void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<int> SearchEF, std::string saveprefix,
                    faiss::ProductQuantizer* pq_model, PQCodesBlob& pq_blob) {
     // Validate all SearchEF values are within supported range
     for (int ef : SearchEF) {
@@ -368,10 +369,10 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
 
     GPUIndex gpu_index;
 
-    
+
 
     load_index_compact_to_gpu(index, gpu_index, paths["index"]);
-   
+
     // Load segment tree to GPU
     load_segment_tree_to_gpu(index, gpu_index);
     load_queries_to_gpu(index, gpu_index);
@@ -379,21 +380,34 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
 
     load_pq_model_to_gpu(gpu_index, pq_model);
     load_pq_codes_to_gpu(gpu_index, pq_blob.codes, pq_blob.n, pq_blob.M, pq_blob.nbits, pq_blob.code_size, pq_model->ksub, pq_model->dsub);
-    
-    std::vector<std::tuple<int, float, float, float, float>> current_suffix_results;
-    
+
+    std::vector<std::tuple<int, float, float, float, float, size_t, size_t>> current_suffix_results;
+
+    int query_nb    = index.storage->query_nb;
+    int max_elements = index.max_elements_;
+    int dim          = index.storage->Dim;
+
+    // Batch size: limits visited array to batch_size * max_elements * 2 bytes.
+    // 100 queries * 2M nodes * 2 bytes = 400 MB instead of 4 GB for 1000 queries.
+    const int BATCH_SIZE = 100;
+
     // Allocate ADC distance table buffer: one flat table per query.
     // Each table is pq_M * pq_ksub floats. Allocated once, reused across all ef values and suffixes.
     {
-        int qnb = index.storage->query_nb;
         size_t table_floats = (size_t)gpu_index.pq_M * gpu_index.pq_ksub;
-        size_t table_bytes  = (size_t)qnb * table_floats * sizeof(float);
+        size_t table_bytes  = (size_t)query_nb * table_floats * sizeof(float);
         cudaError_t err = cudaMalloc(&gpu_index.d_dist_tables, table_bytes);
         if (err != cudaSuccess) {
             printf("ERROR: Failed to allocate ADC distance tables: %s\n", cudaGetErrorString(err));
             return;
         }
     }
+
+    // Allocate full-size metrics arrays once; batches write into offset slices.
+    int* d_hops;
+    int* d_dist_comps;
+    cudaMalloc(&d_hops,      query_nb * sizeof(int));
+    cudaMalloc(&d_dist_comps, query_nb * sizeof(int));
 
     // Iterate over all suffixes in storage->query_range (same as CPU version)
     size_t suffix_idx = 0;
@@ -402,81 +416,84 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
         current_suffix_results.clear();
 
         for (int ef : SearchEF) {
-            int query_nb = index.storage->query_nb;
-            int max_elements = index.max_elements_;
-            int dim = index.storage->Dim;
-            
-            GPUVisitedArray visited;
-            cudaError_t err = initGPUVisitedArray(visited, query_nb, max_elements);
-            if (err != cudaSuccess) {
-                printf("Failed to initialize visited array: %s\n", cudaGetErrorString(err));
-                return;
-            }
-            
-            // Allocate metrics arrays on GPU
-            int* d_hops;
-            int* d_dist_comps;
-            cudaMalloc(&d_hops, query_nb * sizeof(int));
-            cudaMalloc(&d_dist_comps, query_nb * sizeof(int));
-            
-            // Initialize to zero (CRITICAL - otherwise contains garbage values!)
-            cudaMemset(d_hops, 0, query_nb * sizeof(int));
+            cudaMemset(d_hops,      0, query_nb * sizeof(int));
             cudaMemset(d_dist_comps, 0, query_nb * sizeof(int));
-            
-            int threads_per_block = THREADS_PER_QUERY_VAL;   // 128: 1 query per block
-            int threads_per_query = THREADS_PER_QUERY_VAL;   // 128 threads collaborate on each query
-            int queries_per_block = threads_per_block / threads_per_query;  // = 1
-            int num_blocks = (query_nb + queries_per_block - 1) / queries_per_block;
-            
 
-            
-            // Reset visited counters for new search
-            unsigned short* temp_curV = new unsigned short[query_nb];
-            for (int i = 0; i < query_nb; i++) temp_curV[i] = 1;
-            cudaMemcpy(visited.d_curV, temp_curV, query_nb * sizeof(unsigned short), cudaMemcpyHostToDevice);
-            cudaMemset(visited.d_mass, 0, (size_t)query_nb * max_elements * sizeof(unsigned short));
-            delete[] temp_curV;
-            
-            // CRITICAL: Clear output buffers before each SearchEF iteration
-            cudaMemset(d_hops, 0, query_nb * sizeof(int));
-            cudaMemset(d_dist_comps, 0, query_nb * sizeof(int));
-            
-            // Launch appropriate kernel (PQ or normal) - no branching inside kernel
+            int threads_per_block = THREADS_PER_QUERY_VAL;   // 128: 1 query per block
+            int queries_per_block = threads_per_block / THREADS_PER_QUERY_VAL;  // = 1
+
             unsigned long long kernel_seed = std::chrono::system_clock::now().time_since_epoch().count();
-            
+
             cudaEvent_t start, stop;
             cudaEventCreate(&start);
             cudaEventCreate(&stop);
             cudaEventRecord(start);
-            
-            irange_search_kernel_pq<<<num_blocks, threads_per_block>>>(
-                gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx, d_hops, d_dist_comps,
-                index.size_links_per_layer_, kernel_seed
-            );
-            
+
+            // Process queries in batches to bound visited-array VRAM usage.
+            for (int batch_start = 0; batch_start < query_nb; batch_start += BATCH_SIZE) {
+                int batch_size = std::min(BATCH_SIZE, query_nb - batch_start);
+
+                GPUVisitedArray visited;
+                cudaError_t err = initGPUVisitedArray(visited, batch_size, max_elements);
+                if (err != cudaSuccess) {
+                    printf("Failed to initialize visited array: %s\n", cudaGetErrorString(err));
+                    cudaEventDestroy(start);
+                    cudaEventDestroy(stop);
+                    cudaFree(d_hops);
+                    cudaFree(d_dist_comps);
+                    return;
+                }
+
+                // Build a temporary GPUIndex view with per-query pointers offset to this batch.
+                // The kernel uses query_id in [0, batch_size) as a 0-based index into these arrays.
+                GPUIndex batch_gpu_index = gpu_index;
+                batch_gpu_index.d_query_vectors += (long long)batch_start * dim;
+                // d_query_range layout: query_nb * 22 ints (11 suffixes * 2 values)
+                batch_gpu_index.d_query_range   += (long long)batch_start * 22;
+                batch_gpu_index.d_results       += (long long)batch_start * query_K;
+                batch_gpu_index.d_dist_tables   += (long long)batch_start * gpu_index.pq_M * gpu_index.pq_ksub;
+
+                int num_blocks = (batch_size + queries_per_block - 1) / queries_per_block;
+
+                irange_search_kernel_pq<<<num_blocks, threads_per_block>>>(
+                    batch_gpu_index, visited, batch_size, ef, query_K, dim, suffix_idx,
+                    d_hops + batch_start, d_dist_comps + batch_start,
+                    index.size_links_per_layer_, kernel_seed
+                );
+
+                cudaDeviceSynchronize();
+                err = cudaGetLastError();
+                if (err != cudaSuccess) {
+                    printf("Search kernel error (batch %d): %s\n", batch_start, cudaGetErrorString(err));
+                }
+
+                freeGPUVisitedArray(visited);
+            }
+
             cudaEventRecord(stop);
             cudaEventSynchronize(stop);
-            
+
             float milliseconds = 0;
             cudaEventElapsedTime(&milliseconds, start, stop);
             float searchtime = milliseconds / 1000.0f;  // Convert to seconds
-            
-            cudaDeviceSynchronize();
-            err = cudaGetLastError();
+
+            cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 printf("Search kernel error: %s\n", cudaGetErrorString(err));
+                cudaEventDestroy(start);
+                cudaEventDestroy(stop);
                 continue;
             }
-            
+
             // Copy results back to CPU
-            int* cpu_results = new int[query_nb * query_K];
-            int* cpu_hops = new int[query_nb];
+            int* cpu_results    = new int[query_nb * query_K];
+            int* cpu_hops       = new int[query_nb];
             int* cpu_dist_comps = new int[query_nb];
-            
-            cudaMemcpy(cpu_results, gpu_index.d_results, query_nb * query_K * sizeof(int), cudaMemcpyDeviceToHost);
-            cudaMemcpy(cpu_hops, d_hops, query_nb * sizeof(int), cudaMemcpyDeviceToHost);
-            cudaMemcpy(cpu_dist_comps, d_dist_comps, query_nb * sizeof(int), cudaMemcpyDeviceToHost);
-            
+
+            cudaMemcpy(cpu_results,    gpu_index.d_results, query_nb * query_K * sizeof(int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(cpu_hops,       d_hops,              query_nb * sizeof(int),            cudaMemcpyDeviceToHost);
+            cudaMemcpy(cpu_dist_comps, d_dist_comps,        query_nb * sizeof(int),            cudaMemcpyDeviceToHost);
+
             // Compute recall if ground truth is available
             int tp = 0;
             if (index.storage->groundtruth.count(suffix)) {
@@ -492,48 +509,53 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
                     }
                 }
             }
-            
+
             // Calculate metrics
-            float recall = (index.storage->groundtruth.count(suffix)) ? 
+            float recall = (index.storage->groundtruth.count(suffix)) ?
                             (1.0f * tp / query_nb / query_K) : 0.0f;
             float qps = query_nb / searchtime;
-            
+
             long long total_hops = 0;
             long long total_dist_comps = 0;
             for (int i = 0; i < query_nb; i++) {
-                total_hops += cpu_hops[i];
+                total_hops      += cpu_hops[i];
                 total_dist_comps += cpu_dist_comps[i];
             }
             float avg_hops = (float)total_hops / query_nb;
-            float avg_dco = (float)total_dist_comps / query_nb;
+            float avg_dco  = (float)total_dist_comps / query_nb;
 
-            printf("    suffix %d  ef=%d  recall=%.4f  QPS=%.1f  DCO=%.1f  HOP=%.1f  time=%.3fs\n",
-                   suffix, ef, recall, qps, avg_dco, avg_hops, searchtime);
-            
+            // Measure VRAM after all allocations, before kernel launch result collection
+            size_t vram_free = 0, vram_total = 0;
+            cudaMemGetInfo(&vram_free, &vram_total);
+            size_t vram_used_mb = (vram_total - vram_free) / (1024 * 1024);
+
+            cudaFuncAttributes kernel_attrs;
+            cudaFuncGetAttributes(&kernel_attrs, irange_search_kernel_pq);
+            size_t lmem_total   = (size_t)kernel_attrs.localSizeBytes * threads_per_block
+                                  * ((BATCH_SIZE + queries_per_block - 1) / queries_per_block);
+            size_t peak_vram_mb = vram_used_mb + lmem_total / (1024 * 1024);
+
             // Store results for this suffix
-            current_suffix_results.push_back(std::make_tuple(ef, recall, qps, avg_dco, avg_hops));
-            
+            current_suffix_results.push_back(std::make_tuple(ef, recall, qps, avg_dco, avg_hops, vram_used_mb, peak_vram_mb));
+
             delete[] cpu_results;
             delete[] cpu_hops;
             delete[] cpu_dist_comps;
-            
+
             cudaEventDestroy(start);
             cudaEventDestroy(stop);
-            
-            
-            // Clean up
-            cudaFree(d_hops);
-            cudaFree(d_dist_comps);
-            freeGPUVisitedArray(visited);
-            
         }
 
         // Write results to CSV file for this suffix
-        write_results_to_csv(saveprefix, suffix, current_suffix_results);
+        write_results_to_csv(saveprefix, suffix, current_suffix_results, gpu_index.pq_M, gpu_index.pq_nbits);
+        printf("✓ Saved results for suffix %d to %s%d_gpu.csv\n", suffix, saveprefix.c_str(), suffix);
 
         suffix_idx++;  // Increment for next suffix
 
     }
+
+    cudaFree(d_hops);
+    cudaFree(d_dist_comps);
     
     
     // Free ADC distance table buffer

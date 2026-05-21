@@ -12,6 +12,8 @@ OPT_TARGET = $(BUILD_DIR)/optimized_test
 PQ_TARGET = $(BUILD_DIR)/hello_pq
 SOURCE = hello.cu
 PQ_SOURCE = hello_pq.cu
+ROOT_SOURCE = hello_root.cu
+ROOT_TARGET = $(BUILD_DIR)/hello_root
 HEADERS = gpu_search.cuh gpu_search_updated.cuh gpu_search_pq.cuh gpu_pq_distance.cuh gpu_index.cuh gpu_heap.cuh gpu_visited.cuh ../include/iRG_search.h ../include/utils.h
 
 # FAISS support
@@ -74,15 +76,15 @@ ARGS = --data_path $(PROJECT_ROOT)/executable_data/gist1m/500k/gist_base_500k.bi
 # 		--M_compression_spaces 320 \
 # 		--graph_M 32
 
-PQ_ARGS = --data_path_comp $(PROJECT_ROOT)/executable_data/gist1m/500k/gist_base_500k.bin \
-		--query_path $(PROJECT_ROOT)/executable_data/gist1m/500k/gist_query_500k.bin \
-		--index_path $(PROJECT_ROOT)/executable_data/gist1m/500k/gist_500k.index \
-		--result_saveprefix $(PROJECT_ROOT)/executable_data/gist1m/500k/results/pq/results_pq_ \
-		--range_saveprefix $(PROJECT_ROOT)/executable_data/gist1m/500k/query_ranges/query_ranges_500k_ \
-		--groundtruth_saveprefix $(PROJECT_ROOT)/executable_data/gist1m/500k/groundtruth/groundtruth_500k_ \
-		--pq_model_out $(PROJECT_ROOT)/executable_data/gist1m/500k/pq/gist_500k_pq_m320_nb9.faiss \
-		--pq_codes_out $(PROJECT_ROOT)/executable_data/gist1m/500k/pq/gist_500k_pq_codes_m320_nb9.bin \
-		--M_compression_spaces 320 \
+PQ_ARGS = --data_path_comp $(PROJECT_ROOT)/executable_data/audi/1m/yt_aud_1m.bin \
+		--query_path $(PROJECT_ROOT)/executable_data/audi/1m/yt_aud_query.bin \
+		--index_path $(PROJECT_ROOT)/executable_data/audi/1m/yt_aud_1m.index \
+		--result_saveprefix $(PROJECT_ROOT)/executable_data/audi/1m/results/results_pq \
+		--range_saveprefix $(PROJECT_ROOT)/executable_data/audi/1m/query_ranges/qr \
+		--groundtruth_saveprefix $(PROJECT_ROOT)/executable_data/audi/1m/groundtruth/gt \
+		--pq_model_out $(PROJECT_ROOT)/executable_data/audi/1m/pq/audi_1m_pq_m32_nb9.faiss \
+		--pq_codes_out $(PROJECT_ROOT)/executable_data/audi/1m/pq/audi_1m_pq_codes_m32_nb9.bin \
+		--M_compression_spaces 32 \
 		--graph_M 32
 
 # ARGS = --data_path $(PROJECT_ROOT)/executable_data/audi/1m/yt_aud_1m.bin \
@@ -96,6 +98,8 @@ PQ_ARGS = --data_path_comp $(PROJECT_ROOT)/executable_data/gist1m/500k/gist_base
 
 all: $(TARGET)
 
+root_target: $(ROOT_TARGET)
+
 pq_target: $(PQ_TARGET)
 
 $(BUILD_DIR):
@@ -106,6 +110,9 @@ $(TARGET): $(BUILD_DIR) $(SOURCE) $(HEADERS)
 
 $(PQ_TARGET): $(BUILD_DIR) $(PQ_SOURCE) $(HEADERS)
 	$(NVCC) $(ARCH) $(OPT_FLAGS) $(INCLUDE) $(FAISS_CFLAGS) -Xcompiler "$(FAISS_CFLAGS),-fopenmp,-lgomp" $(PQ_SOURCE) -o $(PQ_TARGET) $(FAISS_LIB_PATH) -lgomp -lblas -llapack -lfaiss
+
+$(ROOT_TARGET): $(BUILD_DIR) $(ROOT_SOURCE) $(HEADERS)
+	$(NVCC) $(ARCH) $(OPT_FLAGS) $(INCLUDE) -Xcompiler "-fopenmp,-lgomp" $(ROOT_SOURCE) -o $(ROOT_TARGET) -lgomp
 
 optimized_test: $(OPT_TARGET)
 
@@ -118,6 +125,9 @@ run: $(TARGET)
 run_pq: $(PQ_TARGET)
 	$(PQ_TARGET) $(PQ_ARGS)
 
+run_root: $(ROOT_TARGET)
+	$(ROOT_TARGET) $(ARGS)
+
 run_optimized_test:
 	$(MAKE) optimized_test DIST_THREADS_PER_NEIGHBOR=$(DIST_THREADS_PER_NEIGHBOR) -B
 	$(OPT_TARGET) $(ARGS)
@@ -125,4 +135,4 @@ run_optimized_test:
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: all pq_target run run_pq optimized_test run_optimized_test clean
+.PHONY: all pq_target root_target run run_pq run_root optimized_test run_optimized_test clean
