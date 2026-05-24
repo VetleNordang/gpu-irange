@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# IDUN GPU Search Job: Run iRangeGraph GPU normal + PQ search on all datasets.
-# Both binaries are built and run sequentially on the same 80 GB GPU node.
+# IDUN GPU Search Job: Run iRangeGraph GPU normal + PQ + root search on all datasets.
+# All binaries are built and run sequentially on the same 80 GB GPU node.
 #
 
 #SBATCH --partition=GPUQ
@@ -50,7 +50,7 @@ export GPU_ARCH="sm_${CC}"
 echo "Compute capability: $GPU_ARCH"
 
 # ============================================================
-# Build both binaries
+# Build all binaries
 # ============================================================
 echo "Building GPU normal binary for $GPU_ARCH..."
 rm -rf cude_version/build
@@ -72,6 +72,15 @@ if ! make -C cude_version pq_target \
     exit 1
 fi
 
+echo "Building GPU root binary for $GPU_ARCH..."
+if ! make -C cude_version root_target \
+        ARCH="-gencode arch=compute_${CC},code=sm_${CC}" \
+        FAISS_INCLUDE="$FAISS_INCLUDE" \
+        FAISS_LIB_PATH="$FAISS_LIB_PATH"; then
+    echo "ERROR: root_target build failed. Aborting."
+    exit 1
+fi
+
 # ============================================================
 # Run searches
 # ============================================================
@@ -86,6 +95,12 @@ echo "=========================================="
 echo "Running GPU PQ searches..."
 echo "=========================================="
 bash scripts/run_searches.sh --mode gpu_pq
+
+echo ""
+echo "=========================================="
+echo "Running GPU root searches..."
+echo "=========================================="
+bash scripts/run_searches.sh --mode gpu_root
 
 echo ""
 echo "=========================================="

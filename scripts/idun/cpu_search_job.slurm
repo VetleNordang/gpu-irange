@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# IDUN CPU Search Job: Run iRangeGraph CPU search on all datasets (serial + parallel)
+# IDUN CPU Search Job: Run iRangeGraph CPU search on all datasets (parallel)
 #
 
 #SBATCH --partition=CPUQ
@@ -44,9 +44,6 @@ if [ ! -f "build/tests/search" ]; then
     cd ..
     echo "Build complete."
 fi
-
-echo "--- serial run ---"
-bash scripts/run_searches.sh --mode cpu_serial
 
 echo "--- parallel run ---"
 bash scripts/run_searches.sh --mode cpu_parallel

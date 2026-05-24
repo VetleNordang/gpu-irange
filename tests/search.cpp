@@ -2,7 +2,7 @@
 
 std::unordered_map<std::string, std::string> paths;
 
-const int query_K = 10;
+const int query_K = 100;
 int M;
 
 void Generate(iRangeGraph::DataLoader &storage)

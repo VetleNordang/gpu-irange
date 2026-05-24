@@ -6,6 +6,7 @@
 #include <cassert>
 #include <iostream>
 #include <fstream>
+#include <iomanip>
 #include <chrono>
 #include <algorithm>
 #include <map>
@@ -329,14 +330,15 @@ void load_pq_codes_to_gpu(GPUIndex &gpu_index, const std::vector<uint8_t>& pq_co
 }
 
 void write_results_to_csv(const std::string& saveprefix, int suffix,
-                          const std::vector<std::tuple<int, float, float, float, float, size_t, size_t>>& results,
+                          const std::vector<std::tuple<int, float, float, float, float, float, float, size_t, size_t>>& results,
                           int pq_M, int pq_nbits) {
     std::string savepath = saveprefix + std::to_string(suffix) + "_gpu.csv";
     CheckPath(savepath);
     std::ofstream outfile(savepath);
 
     if (outfile.is_open()) {
-        outfile << "SearchEF,Recall,QPS,DCO,HOP,VRAM_MB,PeakVRAM_MB,PQ_M,PQ_nbits\n";
+        outfile << std::fixed << std::setprecision(6);
+        outfile << "SearchEF,Recall@10,Recall@50,Recall@100,QPS,DCO,HOP,VRAM_MB,PeakVRAM_MB,PQ_M,PQ_nbits\n";
 
         for (const auto& result : results) {
             outfile << std::get<0>(result) << ","
@@ -346,6 +348,8 @@ void write_results_to_csv(const std::string& saveprefix, int suffix,
                     << std::get<4>(result) << ","
                     << std::get<5>(result) << ","
                     << std::get<6>(result) << ","
+                    << std::get<7>(result) << ","
+                    << std::get<8>(result) << ","
                     << pq_M << ","
                     << pq_nbits << "\n";
         }
@@ -381,7 +385,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     load_pq_model_to_gpu(gpu_index, pq_model);
     load_pq_codes_to_gpu(gpu_index, pq_blob.codes, pq_blob.n, pq_blob.M, pq_blob.nbits, pq_blob.code_size, pq_model->ksub, pq_model->dsub);
 
-    std::vector<std::tuple<int, float, float, float, float, size_t, size_t>> current_suffix_results;
+    std::vector<std::tuple<int, float, float, float, float, float, float, size_t, size_t>> current_suffix_results;
 
     int query_nb    = index.storage->query_nb;
     int max_elements = index.max_elements_;
@@ -517,25 +521,34 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             cudaMemcpy(cpu_hops,       d_hops,              query_nb * sizeof(int),            cudaMemcpyDeviceToHost);
             cudaMemcpy(cpu_dist_comps, d_dist_comps,        query_nb * sizeof(int),            cudaMemcpyDeviceToHost);
 
-            // Compute recall if ground truth is available
-            int tp = 0;
+            // Compute recall@10, @50, @100 in one pass
+            float recall10 = 0.0f, recall50 = 0.0f, recall100 = 0.0f;
             if (index.storage->groundtruth.count(suffix)) {
                 auto &gt = index.storage->groundtruth[suffix];
                 for (int i = 0; i < query_nb; i++) {
+                    int tp10 = 0, tp50 = 0, tp100 = 0;
                     for (int k = 0; k < query_K; k++) {
                         int result_id = cpu_results[i * query_K + k];
-                        if (result_id != -1) {
-                            if (std::find(gt[i].begin(), gt[i].end(), result_id) != gt[i].end()) {
-                                tp++;
-                            }
+                        if (result_id == -1) continue;
+                        bool in_gt = std::find(gt[i].begin(), gt[i].end(), result_id) != gt[i].end();
+                        if (in_gt) {
+                            if (k < 10)  tp10++;
+                            if (k < 50)  tp50++;
+                            tp100++;
                         }
                     }
+                    int gt10  = std::min((int)gt[i].size(), 10);
+                    int gt50  = std::min((int)gt[i].size(), 50);
+                    int gt100 = std::min((int)gt[i].size(), 100);
+                    if (gt10  > 0) recall10  += (float)tp10  / gt10;
+                    if (gt50  > 0) recall50  += (float)tp50  / gt50;
+                    if (gt100 > 0) recall100 += (float)tp100 / gt100;
                 }
+                recall10  /= query_nb;
+                recall50  /= query_nb;
+                recall100 /= query_nb;
             }
 
-            // Calculate metrics
-            float recall = (index.storage->groundtruth.count(suffix)) ?
-                            (1.0f * tp / query_nb / query_K) : 0.0f;
             float qps = query_nb / searchtime;
 
             long long total_hops = 0;
@@ -559,7 +572,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             size_t peak_vram_mb = vram_used_mb + lmem_total / (1024 * 1024);
 
             // Store results for this suffix
-            current_suffix_results.push_back(std::make_tuple(ef, recall, qps, avg_dco, avg_hops, vram_used_mb, peak_vram_mb));
+            current_suffix_results.push_back(std::make_tuple(ef, recall10, recall50, recall100, qps, avg_dco, avg_hops, vram_used_mb, peak_vram_mb));
 
             delete[] cpu_results;
             delete[] cpu_hops;

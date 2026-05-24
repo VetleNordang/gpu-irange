@@ -3,10 +3,10 @@
 # Usage: run_searches.sh --mode <mode> [--datasets <key>...] [--runs N]
 #
 # Modes:
-#   cpu_serial    OMP_NUM_THREADS=1,     results → cpu_serial/
 #   cpu_parallel  OMP_NUM_THREADS=nproc, results → cpu_parallel/
 #   gpu_normal    GPU binary,            results → gpu_normal/
 #   gpu_pq        GPU PQ binary,         results → gpu_pq/
+#   gpu_root      GPU root-only entry,   results → gpu_root/
 #
 # Runs (default 7):
 #   --runs 7   1 warmup + 6 real runs → {mode}/warmup/, {mode}/run1/ … run6/
@@ -41,14 +41,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown argument: $1"
-            echo "Usage: $0 --mode <cpu_serial|cpu_parallel|gpu_normal|gpu_pq> [--datasets ...] [--runs N]"
+            echo "Usage: $0 --mode <cpu_parallel|gpu_normal|gpu_pq|gpu_root> [--datasets ...] [--runs N]"
             exit 1
             ;;
     esac
 done
 
 if [[ -z "$MODE" ]]; then
-    echo "Usage: $0 --mode <cpu_serial|cpu_parallel|gpu_normal|gpu_pq> [--datasets ...] [--runs N]"
+    echo "Usage: $0 --mode <cpu_parallel|gpu_normal|gpu_pq|gpu_root> [--datasets ...] [--runs N]"
     exit 1
 fi
 
@@ -62,27 +62,26 @@ fi
 
 # ── Result directory for this mode ────────────────────────────────────────────
 case "$MODE" in
-    cpu_serial)   RESULT_DIR="$DIR_CPU_SERIAL"   ;;
     cpu_parallel) RESULT_DIR="$DIR_CPU_PARALLEL" ;;
     gpu_normal)   RESULT_DIR="$DIR_GPU_NORMAL"   ;;
     gpu_pq)       RESULT_DIR="$DIR_GPU_PQ"       ;;
+    gpu_root)     RESULT_DIR="$DIR_GPU_ROOT"     ;;
     *)
         echo "Unknown mode: $MODE"
-        echo "Valid modes: cpu_serial cpu_parallel gpu_normal gpu_pq"
+        echo "Valid modes: cpu_parallel gpu_normal gpu_pq gpu_root"
         exit 1
         ;;
 esac
 
 # ── Binary check ───────────────────────────────────────────────────────────────
 case "$MODE" in
-    cpu_serial|cpu_parallel)
+    cpu_parallel)
         if [[ ! -f "$CPU_SEARCH_BIN" ]]; then
             echo "ERROR: CPU binary not found: $CPU_SEARCH_BIN"
             echo "Build with: mkdir -p build && cd build && cmake .. && make -j\$(nproc)"
             exit 1
         fi
-        CPU_THREADS=1
-        [[ "$MODE" == "cpu_parallel" ]] && CPU_THREADS="${SLURM_CPUS_PER_TASK:-$(nproc)}"
+        CPU_THREADS="${SLURM_CPUS_PER_TASK:-$(nproc)}"
         echo "OMP_NUM_THREADS=$CPU_THREADS"
         ;;
     gpu_normal)
@@ -96,6 +95,13 @@ case "$MODE" in
         if [[ ! -f "$GPU_PQ_BIN" ]]; then
             echo "ERROR: GPU PQ binary not found: $GPU_PQ_BIN"
             echo "Build with: cd cude_version && make pq_target"
+            exit 1
+        fi
+        ;;
+    gpu_root)
+        if [[ ! -f "$GPU_ROOT_BIN" ]]; then
+            echo "ERROR: GPU root binary not found: $GPU_ROOT_BIN"
+            echo "Build with: cd cude_version && make root_target"
             exit 1
         fi
         ;;
@@ -376,6 +382,76 @@ run_gpu_pq() {
     fi
 }
 
+# ── GPU root runner ────────────────────────────────────────────────────────────
+run_gpu_root() {
+    local key="$1"
+    resolve_dataset "$key" || { FAILURES+=("$key"); return; }
+
+    echo ""
+    echo "=== GPU root: $key ==="
+
+    if [[ ! -f "$D_INDEX" ]]; then
+        echo "SKIP: index not found — $D_INDEX"
+        SKIPS+=("$key")
+        return
+    fi
+
+    local base_dir="$D_RESULTS_BASE/$RESULT_DIR"
+    local any_failed=0
+    local t_start=$SECONDS
+
+    write_run_meta "$base_dir"
+    nvidia-smi --query-gpu=name,memory.free,memory.used,memory.total --format=csv,noheader 2>/dev/null || true
+
+    for (( run=0; run<NUM_RUNS; run++ )); do
+        local run_dir run_label
+        if [[ $NUM_RUNS -eq 1 ]]; then
+            run_dir="$base_dir"
+            run_label="run"
+        elif [[ $run -eq 0 ]]; then
+            run_dir="$base_dir/warmup"
+            run_label="warmup"
+        else
+            run_dir="$base_dir/run$run"
+            run_label="run$run"
+        fi
+
+        mkdir -p "$run_dir"
+        local prefix="$run_dir/$D_GPU_PREFIX"
+        local log_file; log_file=$(mktemp)
+        echo "  [$run_label] → $prefix"
+
+        timeout 3600 "$GPU_ROOT_BIN" \
+                --data_path              "$D_DATA"  \
+                --query_path             "$D_QUERY" \
+                --index_file             "$D_INDEX" \
+                --range_saveprefix       "$D_RANGE" \
+                --groundtruth_saveprefix "$D_GT"    \
+                --result_saveprefix      "$prefix"  \
+                --M "$GRAPH_M" 2>&1 | tee "$log_file"
+        local exit_code=${PIPESTATUS[0]}
+
+        local failed=0
+        [[ $exit_code -ne 0 ]] && failed=1
+        grep -Eqi "out of memory|error:" "$log_file" && failed=1
+        ls "${prefix}"*.csv >/dev/null 2>&1 || failed=1
+        rm -f "$log_file"
+
+        if [[ $failed -ne 0 ]]; then
+            echo "  ✗ $run_label FAILED"
+            any_failed=1
+        fi
+    done
+
+    if [[ $any_failed -eq 0 ]]; then
+        echo "✓ $key done ($(( SECONDS - t_start ))s)"
+        SUCCESSES+=("$key")
+    else
+        echo "✗ $key had failures ($(( SECONDS - t_start ))s)"
+        FAILURES+=("$key")
+    fi
+}
+
 # Write GPU/run metadata next to the results so the plotter can label charts.
 write_run_meta() {
     local dir="$1"
@@ -406,9 +482,10 @@ echo "========================================"
 
 for key in "${DATASETS[@]}"; do
     case "$MODE" in
-        cpu_serial|cpu_parallel) run_cpu "$key" ;;
+        cpu_parallel) run_cpu "$key" ;;
         gpu_normal)              run_gpu_normal "$key" ;;
         gpu_pq)                  run_gpu_pq "$key" ;;
+        gpu_root)                run_gpu_root "$key" ;;
     esac
 done
 

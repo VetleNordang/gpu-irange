@@ -4,16 +4,16 @@
 # Usage: ./execute_experiments.sh [modes...] [--datasets <key>...]
 #
 # Modes:
-#   cpu_serial    single-threaded CPU search
 #   cpu_parallel  multi-threaded CPU search
 #   gpu_normal    GPU search
 #   gpu_pq        GPU PQ search
+#   gpu_root      GPU root-only entry search
 #   all           all four modes (default)
 #
 # Examples:
 #   ./execute_experiments.sh all
-#   ./execute_experiments.sh cpu_serial cpu_parallel
-#   ./execute_experiments.sh cpu_serial --datasets gist250k gist500k
+#   ./execute_experiments.sh cpu_parallel gpu_normal
+#   ./execute_experiments.sh cpu_parallel --datasets gist250k gist500k
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN="$SCRIPT_DIR/run_searches.sh"
@@ -38,7 +38,7 @@ done
 EXPANDED=()
 for m in "${MODES[@]}"; do
     if [[ "$m" == "all" ]]; then
-        EXPANDED+=(cpu_serial cpu_parallel gpu_normal gpu_pq)
+        EXPANDED+=(cpu_parallel gpu_normal gpu_pq gpu_root)
     else
         EXPANDED+=("$m")
     fi
