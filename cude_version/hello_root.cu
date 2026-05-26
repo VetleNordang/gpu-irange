@@ -22,7 +22,7 @@
 #include "gpu_search_updated.cuh"
 
 
-const int query_K = 10;
+const int query_K = 100;
 int M;
 
 using std::cout;

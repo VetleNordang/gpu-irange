@@ -85,10 +85,10 @@ fi
 # Run searches
 # ============================================================
 echo ""
-echo "=========================================="
-echo "Running GPU normal searches..."
-echo "=========================================="
-bash scripts/run_searches.sh --mode gpu_normal
+# echo "=========================================="
+# echo "Running GPU normal searches..."
+# echo "=========================================="
+# bash scripts/run_searches.sh --mode gpu_normal
 
 echo ""
 echo "=========================================="

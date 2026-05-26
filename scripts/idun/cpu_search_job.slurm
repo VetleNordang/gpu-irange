@@ -31,19 +31,17 @@ CONDA_FAISS=/cluster/home/vetlean/.conda/envs/irange
 export LD_LIBRARY_PATH="$CONDA_FAISS/lib:$LD_LIBRARY_PATH"
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-if [ ! -f "build/tests/search" ]; then
-    echo "search binary not found — building with cmake..."
-    mkdir -p build && cd build
-    cmake .. \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DFAISS_INCLUDE_DIR="$CONDA_FAISS/include" \
-        -DFAISS_LIBRARY="$CONDA_FAISS/lib/libfaiss.so" \
-        || { echo "ERROR: cmake failed"; exit 1; }
-    make -j"$SLURM_CPUS_PER_TASK" search \
-        || { echo "ERROR: make failed"; exit 1; }
-    cd ..
-    echo "Build complete."
-fi
+echo "Building CPU search binary..."
+mkdir -p build && cd build
+cmake .. \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DFAISS_INCLUDE_DIR="$CONDA_FAISS/include" \
+    -DFAISS_LIBRARY="$CONDA_FAISS/lib/libfaiss.so" \
+    || { echo "ERROR: cmake failed"; exit 1; }
+make -j"$SLURM_CPUS_PER_TASK" search \
+    || { echo "ERROR: make failed"; exit 1; }
+cd ..
+echo "Build complete."
 
 echo "--- parallel run ---"
 bash scripts/run_searches.sh --mode cpu_parallel

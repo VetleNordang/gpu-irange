@@ -23,7 +23,7 @@
 #include <faiss/index_io.h>
 
 
-const int query_K = 10;
+const int query_K = 100;
 int M_graph = 32;  // Example value, adjust as needed
 int M_compression = 320;  // Example value, adjust as needed
 
