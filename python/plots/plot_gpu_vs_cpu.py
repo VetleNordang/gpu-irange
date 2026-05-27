@@ -353,6 +353,8 @@ def main():
                    help="Environment tag added to output filenames (e.g. 'idun').")
     p.add_argument("--cpu-serial", action="store_true",
                    help="Also plot the single-threaded CPU baseline.")
+    p.add_argument("--gpu-root", action="store_true",
+                   help="Also plot the GPU root-only entry point baseline.")
     p.add_argument("--title", action="store_true",
                    help="Draw a title on each figure (off by default, use captions).")
     p.add_argument("--hardware", default="",
@@ -365,7 +367,7 @@ def main():
                    help="Range used for the summary figure (default 5).")
     args = p.parse_args()
 
-    methods = [m for m in METHODS if m["default"] or (args.cpu_serial and m["key"] == "cpu_serial")]
+    methods = [m for m in METHODS if m["default"] or (args.cpu_serial and m["key"] == "cpu_serial") or (args.gpu_root and m["key"] == "gpu_root")]
     suffix = f"_{args.env}" if args.env else ""
 
     datasets = DATASETS

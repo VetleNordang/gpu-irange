@@ -22,6 +22,8 @@ CONDA_PYTHON=/cluster/home/vetlean/.conda/envs/irange/bin/python3
 
 # Aggregate the per-run CSVs into mean/std/CI95 first — the plotter reads aggregate/.
 "$CONDA_PYTHON" python/aggregate_results.py --all
-"$CONDA_PYTHON" python/plots/plot_gpu_vs_cpu.py --env idun
+"$CONDA_PYTHON" python/plots/plot_gpu_vs_cpu.py --env idun --hardware "NVIDIA H200 NVL"
+"$CONDA_PYTHON" python/plots/plot_recall_thresholds.py --env idun --hardware "NVIDIA H200 NVL"
+"$CONDA_PYTHON" python/plots/plot_memory_comparison.py --env idun --hardware "NVIDIA H200 NVL"
 
 echo "Plot job done: $(date)"
