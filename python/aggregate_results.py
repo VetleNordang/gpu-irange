@@ -66,6 +66,9 @@ def aggregate_mode_dir(mode_dir: Path) -> bool:
             if not p.exists():
                 print(f"  WARNING: missing {p}")
                 continue
+            if p.stat().st_size == 0:
+                print(f"  WARNING: empty file {p} — skipping")
+                continue
             frames.append(pd.read_csv(p))
 
         if not frames:

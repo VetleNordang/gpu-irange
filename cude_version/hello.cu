@@ -21,6 +21,7 @@
 
 const int query_K = 100;
 int M;
+int profile_suffix = -1;
 
 using std::cout;
 std::unordered_map<std::string, std::string> paths;
@@ -101,9 +102,16 @@ void load_index_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &
 
     size_t freeMem = 0, totalMem = 0;
     cudaMemGetInfo(&freeMem, &totalMem);
+    size_t vector_bytes = (size_t)data_points * dimension * sizeof(float);
+    size_t links_bytes  = (size_t)data_points * index.size_links_per_element_;
     printf("GPU memory: %.2f GB free / %.2f GB total\n",
            freeMem / (1024.0*1024*1024), totalMem / (1024.0*1024*1024));
-    printf("Attempting to allocate %.2f MB for index\n", total_index_memory / (1024.0 * 1024.0));
+    printf("Index memory breakdown:\n");
+    printf("  Vector data : %.2f MB  (%d vectors x %d-dim x 4 bytes)\n",
+           vector_bytes / (1024.0*1024), data_points, dimension);
+    printf("  Graph links : %.2f MB  (%d nodes x %zu bytes/node)\n",
+           links_bytes / (1024.0*1024), data_points, index.size_links_per_element_);
+    printf("  Total index : %.2f MB\n", total_index_memory / (1024.0*1024.0));
     
     // Set metadata
     gpu_index.d_dim = dimension;
@@ -250,7 +258,7 @@ int* make_result_buffer_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GP
 }
 
 // CPU function to prepare data and launch GPU kernel
-void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<int> SearchEF, std::string saveprefix) {
+void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<int> SearchEF, std::string saveprefix, int profile_suffix_target = -1) {
     // Validate all SearchEF values are within supported range
     for (int ef : SearchEF) {
         if (ef > MAX_SEARCH_EF) {
@@ -264,11 +272,33 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
 
     // Load main index data to GPU
     load_index_to_gpu(index, gpu_index);
-    
+
     // Load segment tree to GPU
     load_segment_tree_to_gpu(index, gpu_index);
     load_queries_to_gpu(index, gpu_index);
     make_result_buffer_on_gpu(index, gpu_index);
+
+    {
+        // Save memory breakdown alongside results
+        std::string breakdown_path = saveprefix + "_memory_breakdown.txt";
+        std::ofstream bf(breakdown_path);
+        if (bf.is_open()) {
+            int dim = index.storage->Dim;
+            int n   = index.max_elements_;
+            size_t vector_bytes = (size_t)n * dim * sizeof(float);
+            size_t links_bytes  = (size_t)n * index.size_links_per_element_;
+            size_t total_bytes  = (size_t)n * index.size_data_per_element_;
+            size_t tree_bytes   = gpu_index.d_segment_tree.num_nodes * sizeof(GPUNode);
+            bf << "method=gpu_normal\n";
+            bf << "n_vectors=" << n << "\n";
+            bf << "dim=" << dim << "\n";
+            bf << "vector_data_MB=" << std::fixed << std::setprecision(2) << vector_bytes/(1024.0*1024) << "\n";
+            bf << "graph_links_MB=" << links_bytes/(1024.0*1024) << "\n";
+            bf << "total_index_MB=" << total_bytes/(1024.0*1024) << "\n";
+            bf << "segment_tree_MB=" << tree_bytes/(1024.0*1024) << "\n";
+            bf.close();
+        }
+    }
 
     iRangeGraph::DataLoader *storage = index.storage;
 
@@ -283,6 +313,10 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     for (auto range : storage->query_range) {
         int suffix = range.first;
         std::cout << "suffix" << suffix << std::endl;
+        if (profile_suffix_target >= 0 && suffix == profile_suffix_target)
+            cudaProfilerStart();
+        else if (profile_suffix_target >= 0)
+            cudaProfilerStop();
 
         // Pre-compute entry points on CPU once per suffix (shared across all EF and K values)
         {
@@ -340,7 +374,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
 
         for (int ef : SearchEF) {
             limit_tests++;
-            if (limit_tests > 11) {
+            if (profile_suffix_target < 0 && limit_tests > 11) {
                 cudaProfilerStop();
             }
 
@@ -576,9 +610,11 @@ int main(int argc, char **argv) {
             paths["result_saveprefix"] = argv[i + 1];
         if (arg == "--M")
             M = std::stoi(argv[i + 1]);
+        if (arg == "--profile_suffix")
+            profile_suffix = std::stoi(argv[i + 1]);
     }
 
-    if (argc != 15)
+    if (argc != 15 && argc != 17)
         throw Exception("please check input parameters");
 
     
@@ -606,7 +642,7 @@ int main(int argc, char **argv) {
     std::cout << "================================================\n" << std::endl;
     
     // Test all suffixes with all EF values
-    search_on_gpu(index, SearchEF, paths["result_saveprefix"]);
+    search_on_gpu(index, SearchEF, paths["result_saveprefix"], profile_suffix);
 
     std::cout << "\n================================================" << std::endl;
     std::cout << "All GPU searches complete!" << std::endl;

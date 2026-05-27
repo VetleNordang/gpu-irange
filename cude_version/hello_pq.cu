@@ -14,6 +14,7 @@
 #include <memory>
 #include "iRG_search.h"
 #include <curand_kernel.h>
+#include <cuda_profiler_api.h>
 #include "gpu_index.cuh"
 #include "gpu_heap.cuh"
 #include "gpu_visited.cuh"
@@ -24,8 +25,9 @@
 
 
 const int query_K = 100;
-int M_graph = 32;  // Example value, adjust as needed
-int M_compression = 320;  // Example value, adjust as needed
+int M_graph = 32;
+int M_compression = 320;
+int profile_suffix = -1;
 
 #define THREADS_PER_QUERY_VAL 128
 #define MAX_THREADS_PER_BLOCK 2000
@@ -103,6 +105,14 @@ void load_index_to_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GPUIndex &
     int dimension = index.storage->Dim;
     int data_points = index.max_elements_;
     size_t total_index_memory = (size_t)data_points * index.size_data_per_element_;
+    size_t vector_bytes = (size_t)data_points * dimension * sizeof(float);
+    size_t links_bytes  = (size_t)data_points * index.size_links_per_element_;
+    printf("Index memory breakdown (GPU Normal layout):\n");
+    printf("  Vector data : %.2f MB  (%d vectors x %d-dim x 4 bytes)\n",
+           vector_bytes / (1024.0*1024), data_points, dimension);
+    printf("  Graph links : %.2f MB  (%d nodes x %zu bytes/node)\n",
+           links_bytes / (1024.0*1024), data_points, index.size_links_per_element_);
+    printf("  Total index : %.2f MB\n", total_index_memory / (1024.0*1024.0));
 
     // Set metadata
     gpu_index.d_dim = dimension;
@@ -295,6 +305,8 @@ void load_pq_model_to_gpu(GPUIndex &gpu_index, faiss::ProductQuantizer* pq_model
     gpu_index.use_pq = true;
 
     size_t centroids_size = (size_t)pq_model->M * pq_model->ksub * pq_model->dsub * sizeof(float);
+    printf("PQ model (centroids): %.2f MB  (M=%zu, ksub=%zu, dsub=%zu)\n",
+           centroids_size / (1024.0*1024), (size_t)pq_model->M, (size_t)pq_model->ksub, (size_t)pq_model->dsub);
     cudaError_t err = cudaMalloc((void**)&gpu_index.d_centroids, centroids_size);
     if (err != cudaSuccess) {
         printf("CudaMalloc failed for PQ centroids: %s\n", cudaGetErrorString(err));
@@ -314,6 +326,8 @@ void load_pq_codes_to_gpu(GPUIndex &gpu_index, const std::vector<uint8_t>& pq_co
                           int n_vectors, int M, int nbits, int code_size, int ksub, int dsub) {
     gpu_index.pq_codes_cpu = pq_codes;
     gpu_index.gpu_codes_size = (size_t)pq_codes.size() * sizeof(uint8_t);
+    printf("PQ codes: %.2f MB  (%d vectors x %d bytes/code)\n",
+           gpu_index.gpu_codes_size / (1024.0*1024), n_vectors, code_size);
 
     cudaError_t err = cudaMalloc((void**)&gpu_index.d_compressed_codes, gpu_index.gpu_codes_size);
     if (err != cudaSuccess) {
@@ -385,6 +399,31 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     load_pq_model_to_gpu(gpu_index, pq_model);
     load_pq_codes_to_gpu(gpu_index, pq_blob.codes, pq_blob.n, pq_blob.M, pq_blob.nbits, pq_blob.code_size, pq_model->ksub, pq_model->dsub);
 
+    {
+        // Save memory breakdown alongside results
+        std::string breakdown_path = saveprefix + "_memory_breakdown.txt";
+        std::ofstream bf(breakdown_path);
+        if (bf.is_open()) {
+            int dim = index.storage->Dim;
+            int n   = index.max_elements_;
+            size_t links_bytes    = (size_t)n * index.size_links_per_element_;
+            size_t tree_bytes     = gpu_index.d_segment_tree.num_nodes * sizeof(GPUNode);
+            size_t pq_codes_bytes = gpu_index.gpu_codes_size;
+            size_t centroids_bytes = (size_t)pq_model->M * pq_model->ksub * pq_model->dsub * sizeof(float);
+            bf << "method=gpu_pq\n";
+            bf << "n_vectors=" << n << "\n";
+            bf << "dim=" << dim << "\n";
+            bf << "pq_M=" << pq_model->M << "\n";
+            bf << "pq_nbits=" << pq_model->nbits << "\n";
+            bf << "graph_links_MB=" << std::fixed << std::setprecision(2) << links_bytes/(1024.0*1024) << "\n";
+            bf << "pq_codes_MB=" << pq_codes_bytes/(1024.0*1024) << "\n";
+            bf << "pq_centroids_MB=" << centroids_bytes/(1024.0*1024) << "\n";
+            bf << "segment_tree_MB=" << tree_bytes/(1024.0*1024) << "\n";
+            bf << "total_MB=" << (links_bytes + pq_codes_bytes + centroids_bytes + tree_bytes)/(1024.0*1024) << "\n";
+            bf.close();
+        }
+    }
+
     std::vector<std::tuple<int, float, float, float, float, float, float, size_t, size_t>> current_suffix_results;
 
     int query_nb    = index.storage->query_nb;
@@ -416,11 +455,20 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
 
     // Iterate over all suffixes in storage->query_range (same as CPU version)
     size_t suffix_idx = 0;
+    int limit_tests = 0;
     for (auto range : index.storage->query_range) {
         int suffix = range.first;
         current_suffix_results.clear();
 
+        if (profile_suffix >= 0 && suffix == profile_suffix)
+            cudaProfilerStart();
+        else if (profile_suffix >= 0)
+            cudaProfilerStop();
+
         for (int ef : SearchEF) {
+            limit_tests++;
+            if (profile_suffix < 0 && limit_tests > 11)
+                cudaProfilerStop();
             cudaMemset(d_hops,      0, query_nb * sizeof(int));
             cudaMemset(d_dist_comps, 0, query_nb * sizeof(int));
 
@@ -638,7 +686,9 @@ int main(int argc, char **argv) {
         if (arg == "--M_compression_spaces")
             M_compression = std::stoi(argv[i + 1]);
         if (arg == "--graph_M")
-            M_graph = std::stoi(argv[i + 1]);  // Can also override with graph_M
+            M_graph = std::stoi(argv[i + 1]);
+        if (arg == "--profile_suffix")
+            profile_suffix = std::stoi(argv[i + 1]);
     }
 
     if (argc < 15) {

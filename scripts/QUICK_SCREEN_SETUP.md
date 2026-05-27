@@ -16,11 +16,20 @@ screen -S dev
 docker build -f .devcontainer/Dockerfile -t irange-dev .
 ```
 
+Verify it built with CUDA 12.4 (should print "release 12.4"):
+```bash
+docker run --rm irange-dev nvcc --version
+```
+
 ### 3. Inside screen - Run container
 
 ```bash
 # This mounts your current directory to /workspaces/irange inside the container
-docker run -it --gpus all -v $(pwd):/workspaces/irange -v /data/vetlean:/data/vetlean irange-dev
+docker run -it --gpus all \
+  -v $(pwd):/workspaces/irange \
+  -v /lhome/vetlean/.claude:/home/vetlean/.claude \
+  -v /data/vetlean:/data/vetlean \
+  irange-dev bash
 ```
 
 ### 4. Now you're inside the container terminal (inside screen)

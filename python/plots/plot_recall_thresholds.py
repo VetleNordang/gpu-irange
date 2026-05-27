@@ -123,7 +123,7 @@ def load_method(method_dir):
             return pd.concat(frames, ignore_index=True)
 
     # Fall back to raw run dirs or top-level CSVs
-    run_dirs = sorted(d for d in method_dir.glob("run*") if d.is_dir())
+    run_dirs = sorted(d for d in method_dir.glob("run*") if d.is_dir() and any(d.glob("*.csv")))
     sources = run_dirs if run_dirs else [method_dir]
     frames = []
     for src in sources:
@@ -237,7 +237,15 @@ def main():
     p.add_argument("--dataset", default=None, help="Dataset key prefix (e.g. 'audi1m'). Omit for all.")
     p.add_argument("--env", default=None, help="Suffix for output filenames (e.g. 'idun').")
     p.add_argument("--hardware", default="", help="Hardware label for figure titles.")
+    p.add_argument("--aggregate", action="store_true", help="Re-run aggregate_results.py before plotting.")
     args = p.parse_args()
+
+    if args.aggregate:
+        agg_script = Path(__file__).resolve().parent.parent / "aggregate_results.py"
+        print("Running aggregate_results.py --all ...")
+        result = subprocess.run([sys.executable, str(agg_script), "--all"], check=False)
+        if result.returncode != 0:
+            print("Warning: aggregate_results.py exited with errors — plotting with existing data.")
 
     suffix = f"_{args.env}" if args.env else ""
 

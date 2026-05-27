@@ -1,5 +1,7 @@
 NVCC = nvcc
-ARCH = -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80
+GPU_SM ?= $(shell nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d '.')
+GPU_SM := $(or $(GPU_SM),80)
+ARCH = -gencode arch=compute_$(GPU_SM),code=sm_$(GPU_SM)
 FAISS_INCLUDE ?= -I/cluster/home/vetlean/.conda/envs/irange/include
 FAISS_LIB_PATH ?= -L/cluster/home/vetlean/.conda/envs/irange/lib
 INCLUDE = -I../include $(FAISS_INCLUDE)
