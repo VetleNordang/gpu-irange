@@ -29,9 +29,12 @@ from scipy import stats
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = PROJECT_ROOT / "executable_data"
 
-MODES = ["cpu_serial", "cpu_parallel", "gpu_normal", "gpu_pq"]
+MODES = ["cpu_serial", "cpu_parallel", "gpu_normal", "gpu_pq", "gpu_root"]
 
-METRICS = ["Recall", "QPS", "DCO", "HOP", "RAM_MB", "VRAM_MB", "PeakVRAM_MB"]
+# Old files use "Recall"; new files use "Recall@10" / "Recall@50" / "Recall@100".
+# Both are included so the aggregator handles either schema.
+METRICS = ["Recall", "Recall@10", "Recall@50", "Recall@100",
+           "QPS", "DCO", "HOP", "RAM_MB", "VRAM_MB", "PeakVRAM_MB"]
 
 
 def aggregate_mode_dir(mode_dir: Path) -> bool:

@@ -58,6 +58,7 @@ METHODS = [
     {"key": "cpu_parallel", "label": "CPU-P",      "color": "tab:blue",   "default": True},
     {"key": "gpu_normal",   "label": "GPU Normal", "color": "tab:orange", "default": True},
     {"key": "gpu_pq",       "label": "GPU PQ",     "color": "tab:green",  "default": True},
+    {"key": "gpu_root",     "label": "GPU Root",   "color": "tab:purple", "default": False},
 ]
 
 RANGES = [2, 5, 8]
@@ -75,20 +76,35 @@ def parse_range(filename):
 
 
 def read_csv(path):
-    """Read one result CSV, with or without a header row."""
+    """Read one result CSV, with or without a header row.
+
+    Always returns a dataframe with a 'Recall@10' column regardless of whether
+    the source file uses the old 'Recall' name or the new 'Recall@10' name.
+    """
     with open(path) as fh:
         has_header = fh.readline().startswith("SearchEF")
     df = pd.read_csv(path) if has_header else pd.read_csv(path, names=COLUMNS)
-    if not {"SearchEF", "Recall", "QPS"}.issubset(df.columns):
+    # Normalise old single-recall column to Recall@10.
+    if "Recall" in df.columns and "Recall@10" not in df.columns:
+        df = df.rename(columns={"Recall": "Recall@10"})
+    if not {"SearchEF", "Recall@10", "QPS"}.issubset(df.columns):
         return None
-    df = df[["SearchEF", "Recall", "QPS"]].apply(pd.to_numeric, errors="coerce")
+    df = df[["SearchEF", "Recall@10", "QPS"]].apply(pd.to_numeric, errors="coerce")
     return df.dropna()
+
+
+def _recall_col(df):
+    """Return the recall@10 column name present in df, or None."""
+    for name in ("Recall@10", "Recall"):
+        if name in df.columns:
+            return name
+    return None
 
 
 def _load_from_aggregate(method_dir):
     """Load from aggregate/*.csv produced by aggregate_results.py.
 
-    Returns a dataframe with columns (range, SearchEF, Recall, QPS, QPS_min, QPS_max, n_runs),
+    Returns a dataframe with columns (range, SearchEF, Recall@10, QPS, QPS_min, QPS_max, n_runs),
     or None if the aggregate dir is absent or unusable.
     """
     agg_dir = method_dir / "aggregate"
@@ -100,14 +116,21 @@ def _load_from_aggregate(method_dir):
         if rng not in RANGES:
             continue
         df = pd.read_csv(csv)
-        required = {"SearchEF", "Recall_mean", "QPS_mean", "QPS_ci95"}
-        if not required.issubset(df.columns):
+        if not {"SearchEF", "QPS_mean", "QPS_ci95"}.issubset(df.columns):
             continue
-        df = df.rename(columns={"Recall_mean": "Recall", "QPS_mean": "QPS"})
+        # Accept either old (Recall_mean) or new (Recall@10_mean) aggregate column name.
+        recall_src = None
+        for candidate in ("Recall@10_mean", "Recall_mean"):
+            if candidate in df.columns:
+                recall_src = candidate
+                break
+        if recall_src is None:
+            continue
+        df = df.rename(columns={recall_src: "Recall@10", "QPS_mean": "QPS"})
         df["QPS_min"] = df["QPS"] - df["QPS_ci95"]
         df["QPS_max"] = df["QPS"] + df["QPS_ci95"]
         df["range"] = rng
-        frames.append(df[["range", "SearchEF", "Recall", "QPS", "QPS_min", "QPS_max", "n_runs"]])
+        frames.append(df[["range", "SearchEF", "Recall@10", "QPS", "QPS_min", "QPS_max", "n_runs"]])
     return pd.concat(frames, ignore_index=True) if frames else None
 
 
@@ -147,11 +170,11 @@ def _load_manual(method_dir):
           f" — bands show min/max, NOT 95% CI. Run aggregate_results.py for consistent statistics.")
     raw = pd.concat(frames, ignore_index=True)
     return (raw.groupby(["range", "SearchEF"], as_index=False)
-               .agg(Recall=("Recall", "mean"),
-                    QPS=("QPS", "mean"),
-                    QPS_min=("QPS", "min"),
-                    QPS_max=("QPS", "max"),
-                    n_runs=("QPS", "size")))
+               .agg(**{"Recall@10": ("Recall@10", "mean"),
+                        "QPS":       ("QPS", "mean"),
+                        "QPS_min":   ("QPS", "min"),
+                        "QPS_max":   ("QPS", "max"),
+                        "n_runs":    ("QPS", "size")}))
 
 
 def load_method(method_dir):
@@ -205,8 +228,8 @@ def plot_faceted(name, data, methods, kind, out_path, title, hw_label=""):
             sub = agg[agg["range"] == rng]
             if sub.empty:
                 continue
-            sub = sub.sort_values("SearchEF" if kind == "qps" else "Recall")
-            x = sub["SearchEF"] if kind == "qps" else sub["Recall"]
+            sub = sub.sort_values("SearchEF" if kind == "qps" else "Recall@10")
+            x = sub["SearchEF"] if kind == "qps" else sub["Recall@10"]
             line, = ax.plot(x, sub["QPS"], marker="o", ms=4, lw=1.8,
                             color=m["color"], label=m["label"])
             ax.fill_between(x, sub["QPS_min"], sub["QPS_max"],
@@ -223,6 +246,7 @@ def plot_faceted(name, data, methods, kind, out_path, title, hw_label=""):
             ax.set_xlabel("SearchEF")
         else:
             ax.set_xlabel("Recall@10")
+            ax.set_xlim(0, 1)
     if not drew:
         plt.close(fig)
         print(f"  skip {out_path.name}: no data")
