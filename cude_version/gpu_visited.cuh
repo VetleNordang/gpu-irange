@@ -57,19 +57,19 @@
  */
 
 struct GPUVisitedArray {
-    unsigned short* d_mass;      // [num_queries × max_elements] - stores visit counter for each node
-    unsigned short* d_curV;      // [num_queries] - current counter value for each query
+    uint8_t* d_mass;             // [num_queries × max_elements] - stores visit counter for each node
+    uint8_t* d_curV;             // [num_queries] - current counter value for each query
     int max_elements;            // Total number of nodes in the graph
     int num_queries;             // Number of concurrent queries
-    
+
     // Size of one query's visited array in bytes
     size_t query_array_size() const {
-        return (size_t)max_elements * sizeof(unsigned short);
+        return (size_t)max_elements * sizeof(uint8_t);
     }
-    
+
     // Total size needed on GPU
     size_t total_size() const {
-        return query_array_size() * num_queries + num_queries * sizeof(unsigned short);
+        return query_array_size() * num_queries + num_queries * sizeof(uint8_t);
     }
 };
 
@@ -77,20 +77,12 @@ struct GPUVisitedArray {
 // query_id: which query is asking (0 to num_queries-1)
 // node_id: which node to check (0 to max_elements-1)
 __device__ inline bool isVisited(const GPUVisitedArray& visited, int query_id, int node_id) {
-    // Calculate offset: each query has its own section of the array
-    // Cast to long long to prevent int32 overflow for datasets with >2.1M elements
     long long offset = (long long)query_id * visited.max_elements + node_id;
-
-    // Compare: does the number on this node match my current game number?
     return visited.d_mass[offset] == visited.d_curV[query_id];
 }
 
-// Mark a node as visited in this search
 __device__ inline void markVisited(GPUVisitedArray& visited, int query_id, int node_id) {
-    // Cast to long long to prevent int32 overflow for datasets with >2.1M elements
     long long offset = (long long)query_id * visited.max_elements + node_id;
-
-    // Write current game number to this node
     visited.d_mass[offset] = visited.d_curV[query_id];
 }
 
@@ -98,41 +90,36 @@ __device__ inline void markVisited(GPUVisitedArray& visited, int query_id, int n
 inline cudaError_t initGPUVisitedArray(GPUVisitedArray& visited, int num_queries, int max_elements) {
     visited.num_queries = num_queries;
     visited.max_elements = max_elements;
-    
-    // Allocate memory for visit counters
-    size_t mass_size = (size_t)num_queries * max_elements * sizeof(unsigned short);
+
+    size_t mass_size = (size_t)num_queries * max_elements * sizeof(uint8_t);
     cudaError_t err = cudaMalloc(&visited.d_mass, mass_size);
     if (err != cudaSuccess) return err;
-    
-    // Initialize all to 0
+
     err = cudaMemset(visited.d_mass, 0, mass_size);
     if (err != cudaSuccess) {
         cudaFree(visited.d_mass);
         return err;
     }
-    
-    // Allocate memory for current counters (one per query)
-    size_t curV_size = num_queries * sizeof(unsigned short);
+
+    size_t curV_size = num_queries * sizeof(uint8_t);
     err = cudaMalloc(&visited.d_curV, curV_size);
     if (err != cudaSuccess) {
         cudaFree(visited.d_mass);
         return err;
     }
-    
-    // Initialize all counters to 1 (start from 1, not 0)
-    unsigned short* temp = new unsigned short[num_queries];
-    for (int i = 0; i < num_queries; i++) {
-        temp[i] = 1;
-    }
+
+    // Start counters at 1 so 0 means "unvisited"
+    uint8_t* temp = new uint8_t[num_queries];
+    for (int i = 0; i < num_queries; i++) temp[i] = 1;
     err = cudaMemcpy(visited.d_curV, temp, curV_size, cudaMemcpyHostToDevice);
     delete[] temp;
-    
+
     if (err != cudaSuccess) {
         cudaFree(visited.d_mass);
         cudaFree(visited.d_curV);
         return err;
     }
-    
+
     return cudaSuccess;
 }
 
@@ -146,18 +133,13 @@ inline void freeGPUVisitedArray(GPUVisitedArray& visited) {
 
 // Kernel to increment counters for next batch of searches
 // This is how you "reset" without actually clearing memory!
-__global__ void incrementVisitedCounters(unsigned short* d_curV, int num_queries) {
+__global__ void incrementVisitedCounters(uint8_t* d_curV, int num_queries) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_queries) {
         d_curV[idx]++;
-        
-        // If we overflow (reach 0), need to actually clear the mass array
-        // This happens every 65,535 searches, so very rare
-        if (d_curV[idx] == 0) {
-            d_curV[idx] = 1;  // Reset to 1
-            // Note: In practice, you'd need to memset d_mass to 0 here
-            // But this is so rare we can handle it separately
-        }
+        // Wraps at 255 back to 0; caller must memset d_mass when this happens.
+        // With uint8 this occurs every 254 searches per query (rare in practice).
+        if (d_curV[idx] == 0) d_curV[idx] = 1;
     }
 }
 

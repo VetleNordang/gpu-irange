@@ -67,6 +67,114 @@ METHODS = [
 ]
 
 
+def _read_breakdown(method_dir: Path):
+    """Read memory_breakdown.txt from the first run dir that has one. Returns dict or None."""
+    run_dirs = sorted(d for d in method_dir.glob("run*") if d.is_dir())
+    sources = run_dirs if run_dirs else [method_dir]
+    for src in sources:
+        for txt in src.glob("*memory_breakdown.txt"):
+            result = {}
+            try:
+                for line in txt.read_text().splitlines():
+                    if "=" in line:
+                        k, v = line.split("=", 1)
+                        try:
+                            result[k.strip()] = float(v.strip())
+                        except ValueError:
+                            result[k.strip()] = v.strip()
+            except Exception:
+                continue
+            if result:
+                return result
+    return None
+
+
+def plot_family_stacked(family, out_path, hw_label=""):
+    """Stacked bar chart showing memory breakdown per component per dataset size."""
+    datasets = family["datasets"]
+
+    # Components and colours for gpu_normal
+    NORMAL_COMPONENTS = [
+        ("vector_data_MB",  "Vectors",       "#4e9af1"),
+        ("graph_links_MB",  "Graph links",   "#f1894e"),
+        ("segment_tree_MB", "Segment tree",  "#a0a0a0"),
+    ]
+    PQ_COMPONENTS = [
+        ("graph_links_MB",  "Graph links",   "#f1894e"),
+        ("pq_codes_MB",     "PQ codes",      "#4ecf6e"),
+        ("pq_centroids_MB", "PQ centroids",  "#b44ecf"),
+        ("segment_tree_MB", "Segment tree",  "#a0a0a0"),
+    ]
+
+    method_keys = ["gpu_normal", "gpu_pq"]
+    method_labels = {"gpu_normal": "GPU Normal", "gpu_pq": "GPU PQ"}
+    method_components = {"gpu_normal": NORMAL_COMPONENTS, "gpu_pq": PQ_COMPONENTS}
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5), sharey=False)
+
+    any_data = False
+    for ax, mkey in zip(axes, method_keys):
+        labels_x, bottoms, component_data = [], [], {}
+        for ds in datasets:
+            results_dir = BASE_DIR / ds["path"] / "results"
+            bd = _read_breakdown(results_dir / mkey)
+            labels_x.append(ds["label"])
+            for (field, label, _) in method_components[mkey]:
+                component_data.setdefault(label, []).append(
+                    bd.get(field, 0) / 1024 if bd else 0  # MB → GB
+                )
+
+        x = np.arange(len(labels_x))
+        bottoms = np.zeros(len(labels_x))
+        for (field, label, color) in method_components[mkey]:
+            vals = np.array(component_data[label])
+            mask = vals > 0
+            if not mask.any():
+                continue
+            bars = ax.bar(x, vals, bottom=bottoms, color=color, label=label,
+                          alpha=0.88, edgecolor="white", linewidth=0.5)
+            # Label each segment if large enough
+            for i, (bar, v) in enumerate(zip(bars, vals)):
+                if v > 0.1:
+                    ax.text(bar.get_x() + bar.get_width() / 2,
+                            bottoms[i] + v / 2,
+                            f"{v:.1f}", ha="center", va="center",
+                            fontsize=7, color="white", fontweight="bold")
+            bottoms += vals
+            any_data = True
+
+        # Total label on top of each bar
+        for i, total in enumerate(bottoms):
+            if total > 0:
+                ax.text(i, total + 0.05, f"{total:.1f} GB",
+                        ha="center", va="bottom", fontsize=8)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels_x)
+        ax.set_xlabel("Dataset size")
+        ax.set_ylabel("VRAM (GB)")
+        ax.set_title(method_labels[mkey], fontsize=11)
+        ax.grid(axis="y", alpha=0.3)
+        ax.set_ylim(bottom=0)
+        ax.legend(fontsize=8, loc="upper left")
+
+    if not any_data:
+        plt.close(fig)
+        print(f"  no breakdown data for {family['name']} — skipping stacked plot")
+        return
+
+    t = f"{family['name']}"
+    if hw_label:
+        t += f" — {hw_label}"
+    t += ": VRAM Breakdown by Component"
+    fig.suptitle(t, fontsize=13, fontweight="bold")
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  saved {out_path.relative_to(BASE_DIR)}")
+
+
 def _read_vram(method_dir: Path):
     """Return (vram_mb, peak_vram_mb) as the mean across all run CSVs, or None."""
     vrам_vals, peak_vals = [], []
@@ -197,6 +305,7 @@ def main():
         print(f"\n{family['name']}")
         out_dir = BASE_DIR / family["key"] / "results" / "analysis"
         plot_family(family, out_dir / f"memory_comparison{suffix}.png", args.hardware)
+        plot_family_stacked(family, out_dir / f"memory_breakdown{suffix}.png", args.hardware)
 
     print("\ndone")
 
