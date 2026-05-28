@@ -93,7 +93,7 @@ bash scripts/run_searches.sh --mode gpu_root
 echo ""
 echo "=== Profiling ==="
 
-HW="NVIDIA H200 NVL"
+HW="NVIDIA H100 80GB HBM3"
 PROFILE_DATASETS=(audi1m video1m)
 PROFILE_SUFFIXES=(2 5 8)
 
