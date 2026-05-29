@@ -45,6 +45,11 @@ export PATH="$CONDA_FAISS/bin:$PATH"
 export CONDA_PYTHON="$CONDA_FAISS/bin/python3"
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
+# FAISS cmake flags — picked up by run_full_pipeline.sh when it calls cmake
+export FAISS_INCLUDE_DIR="$CONDA_FAISS/include"
+export FAISS_LIBRARY="$CONDA_FAISS/lib/libfaiss.so"
+export FAISS_RPATH="$CONDA_FAISS/lib"
+
 FREE_MIB=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader | head -1 | tr -d ' MiB')
 if [ "${FREE_MIB:-0}" -lt 10000 ]; then
     echo "ERROR: GPU has only ${FREE_MIB} MiB free — need at least 10 GB. Aborting."
@@ -54,6 +59,7 @@ fi
 
 CC=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d ' .')
 export GPU_ARCH="sm_${CC}"
+export CUDA_ARCH_FLAGS="-gencode arch=compute_${CC},code=sm_${CC}"
 echo "Compute capability: $GPU_ARCH"
 
 bash scripts/run_full_pipeline.sh "$@"

@@ -41,13 +41,19 @@ step() { echo ""; echo "════ $1 ════"; }
 step "0. Compile CPU and GPU binaries"
 
 echo "Building CPU binaries ..."
-cmake -S "$PROJECT_ROOT" -B "$PROJECT_ROOT/build" -DCMAKE_BUILD_TYPE=Release > /dev/null
+cmake -S "$PROJECT_ROOT" -B "$PROJECT_ROOT/build" -DCMAKE_BUILD_TYPE=Release \
+    ${FAISS_INCLUDE_DIR:+-DENABLE_FAISS=ON -DFAISS_INCLUDE_DIR="$FAISS_INCLUDE_DIR" -DFAISS_LIBRARY="$FAISS_LIBRARY" -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,$FAISS_RPATH -L$FAISS_RPATH"} \
+    > /dev/null
 cmake --build "$PROJECT_ROOT/build" -j"$(nproc)" \
     || fail "CPU build failed"
 echo "  CPU binaries OK"
 
 echo "Building GPU binaries ..."
+rm -rf "$PROJECT_ROOT/cude_version/build"
 make -C "$PROJECT_ROOT/cude_version" optimized_test pq_target root_target \
+    ${CUDA_ARCH_FLAGS:+ARCH="$CUDA_ARCH_FLAGS"} \
+    ${FAISS_INCLUDE:+FAISS_INCLUDE="$FAISS_INCLUDE"} \
+    ${FAISS_LIB_PATH:+FAISS_LIB_PATH="$FAISS_LIB_PATH"} \
     || fail "GPU build failed"
 echo "  GPU binaries OK"
 
