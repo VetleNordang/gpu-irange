@@ -154,7 +154,11 @@ __device__ int GetOverLap(int l, int r, int ql, int qr) {
     return R - L + 1;
 }
 
-// SelectEdge: Navigate segment tree to find edges collaboratively
+// SelectEdge: Navigate segment tree to find edges collaboratively.
+// Mirrors CPU SelectEdge: walk down from root, skipping levels where the child
+// has the same overlap as the parent (inner "contain" loop), then collect edges
+// from the chosen level. Continue descending until the node is fully within [ql,qr]
+// (CPU loop condition: while cur_node->lbound < ql || cur_node->rbound > qr).
 __device__ void SelectEdge_gpu(int pid, int ql, int qr, int edge_limit,
                                 GPUNode* d_nodes, int root_idx,
                                 char* data_memory, size_t size_data_per_element,
@@ -162,94 +166,102 @@ __device__ void SelectEdge_gpu(int pid, int ql, int qr, int edge_limit,
                                 GPUVisitedArray visited, int query_id,
                                 int* output_edges, int* output_count, int lane_id) {
     __shared__ int s_cur_idx;
-    __shared__ int s_nxt_idx;
     __shared__ int s_neighbor_count;
     __shared__ int* s_neighbors;
     __shared__ GPUNode s_cur_node;
-    
+    __shared__ bool s_done;
+
     if (lane_id == 0) {
         *output_count = 0;
         s_cur_idx = root_idx;
-        s_nxt_idx = root_idx;
+        s_done = false;
     }
     __syncthreads();
-    
-    __shared__ bool s_done;
-    __shared__ int s_depth_counter;
-    if (lane_id == 0) { s_done = false; s_depth_counter = 0; }
-    __syncthreads();
-    
+
     while (!s_done) {
+        // --- Lane 0: inner "contain" descent to find the right tree level ---
         if (lane_id == 0) {
-            s_cur_idx = s_nxt_idx;
             s_cur_node = d_nodes[s_cur_idx];
-            
-            bool contain = false;
-            do {
+
+            // Skip down while the child that contains pid has the same overlap as parent
+            bool contain = true;
+            while (contain) {
                 contain = false;
-                s_nxt_idx = -1;
                 if (!s_cur_node.is_leaf) {
+                    int nxt_idx = -1;
                     if (s_cur_node.left_child_index != -1) {
                         GPUNode left_child = d_nodes[s_cur_node.left_child_index];
-                        if (left_child.lbound <= pid && left_child.rbound >= pid) {
-                            s_nxt_idx = s_cur_node.left_child_index;
-                        }
+                        if (left_child.lbound <= pid && left_child.rbound >= pid)
+                            nxt_idx = s_cur_node.left_child_index;
                     }
-                    if (s_nxt_idx == -1 && s_cur_node.right_child_index != -1) {
+                    if (nxt_idx == -1 && s_cur_node.right_child_index != -1) {
                         GPUNode right_child = d_nodes[s_cur_node.right_child_index];
-                        if (right_child.lbound <= pid && right_child.rbound >= pid) {
-                            s_nxt_idx = s_cur_node.right_child_index;
-                        }
+                        if (right_child.lbound <= pid && right_child.rbound >= pid)
+                            nxt_idx = s_cur_node.right_child_index;
                     }
-
-                    if (s_nxt_idx != -1) {
-                        GPUNode nxt_node = d_nodes[s_nxt_idx];
+                    if (nxt_idx != -1) {
+                        GPUNode nxt_node = d_nodes[nxt_idx];
                         int cur_overlap = GetOverLap(s_cur_node.lbound, s_cur_node.rbound, ql, qr);
                         int nxt_overlap = GetOverLap(nxt_node.lbound, nxt_node.rbound, ql, qr);
-
                         if (cur_overlap == nxt_overlap) {
-                            s_cur_idx = s_nxt_idx;
+                            s_cur_idx = nxt_idx;
                             s_cur_node = nxt_node;
                             contain = true;
                         }
                     }
                 }
-            } while (contain);
-            
-            s_neighbors = get_linklist_gpu(pid, s_cur_node.depth, data_memory, 
-                                             size_data_per_element, size_links_per_layer,
-                                             &s_neighbor_count);
+            }
+
+            s_neighbors = get_linklist_gpu(pid, s_cur_node.depth, data_memory,
+                                           size_data_per_element, size_links_per_layer,
+                                           &s_neighbor_count);
         }
         __syncthreads();
-        
-        // Cooperative visited checking
+
+        // --- All lanes: collect in-range unvisited edges from this level ---
         for (int i = lane_id; i < s_neighbor_count; i += THREADS_PER_QUERY) {
             if (*output_count >= edge_limit) continue;
             int neighbor_id = s_neighbors[i];
-            
             if (neighbor_id >= ql && neighbor_id <= qr) {
                 if (!isVisited(visited, query_id, neighbor_id)) {
                     int pos = atomicAdd(output_count, 1);
                     if (pos < edge_limit) {
                         output_edges[pos] = neighbor_id;
                     } else {
-                        atomicSub(output_count, 1); // Rollback
+                        atomicSub(output_count, 1);
                     }
                 }
             }
         }
         __syncthreads();
-        
+
+        // --- Lane 0: decide whether to descend further (mirrors CPU outer do-while) ---
+        // CPU continues while cur_node->lbound < ql || cur_node->rbound > qr,
+        // i.e., stops once the node is fully contained within [ql, qr].
         if (lane_id == 0) {
-            s_depth_counter++;
-            // Terminate when: enough edges found, node fully within range,
-            // leaf reached (s_nxt_idx==-1), or hard depth limit exceeded.
-            if (*output_count >= edge_limit
-                    || (s_cur_node.lbound >= ql && s_cur_node.rbound <= qr)
-                    || s_nxt_idx == -1
-                    || s_depth_counter > 64) {
-                
+            bool fully_contained = (s_cur_node.lbound >= ql && s_cur_node.rbound <= qr);
+            bool no_child = s_cur_node.is_leaf;
+
+            if (fully_contained || no_child || *output_count >= edge_limit) {
                 s_done = true;
+            } else {
+                // Descend into the child that contains pid for the next outer iteration
+                int nxt_idx = -1;
+                if (s_cur_node.left_child_index != -1) {
+                    GPUNode left_child = d_nodes[s_cur_node.left_child_index];
+                    if (left_child.lbound <= pid && left_child.rbound >= pid)
+                        nxt_idx = s_cur_node.left_child_index;
+                }
+                if (nxt_idx == -1 && s_cur_node.right_child_index != -1) {
+                    GPUNode right_child = d_nodes[s_cur_node.right_child_index];
+                    if (right_child.lbound <= pid && right_child.rbound >= pid)
+                        nxt_idx = s_cur_node.right_child_index;
+                }
+                if (nxt_idx == -1) {
+                    s_done = true;  // No child contains pid — can't go further
+                } else {
+                    s_cur_idx = nxt_idx;
+                }
             }
         }
         __syncthreads();
@@ -346,6 +358,7 @@ __global__ void irange_search_kernel(
             float entry_dist  = d_entry_dists[base + f];
             int   entry_point = d_entry_ids  [base + f];
 
+            markVisited(visited, query_id, entry_point);
             candidate_set.push(entry_dist, entry_point);
             top_candidates.push(entry_dist, entry_point);
             if (top_candidates.size > SearchEF) top_candidates.pop();

@@ -59,7 +59,7 @@ done
 # ── VIDEO ─────────────────────────────────────────────────────────────────────
 echo ""
 echo "── Video (YouTube RGB) ──"
-for size in 1m 2m 4m 8m; do
+for size in 1m 2m 4m 6m; do
     echo " [$size]"
     dir="$DATA/video/$size"
     check_file "$dir/youtube_rgb_${size}.bin"
@@ -74,7 +74,7 @@ done
 # ── AUDI ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "── Audi (YouTube Audio) ──"
-for size in 1m 2m 4m 8m; do
+for size in 1m 2m 4m 6m; do
     echo " [$size]"
     dir="$DATA/audi/$size"
     check_file "$dir/yt_aud_${size}.bin"
@@ -94,7 +94,7 @@ for size in 250k 500k 750k 1000k; do
     [ "$count" -gt 0 ] && ok "gist1m/$size/results ($count CSVs)" || warn "gist1m/$size/results (no CSVs yet)"
 done
 for mod in video audi; do
-    for size in 1m 2m 4m 8m; do
+    for size in 1m 2m 4m 6m; do
         count=$(find "$DATA/$mod/$size/results" -name "*.csv" 2>/dev/null | wc -l)
         [ "$count" -gt 0 ] && ok "$mod/$size/results ($count CSVs)" || warn "$mod/$size/results (no CSVs yet)"
     done

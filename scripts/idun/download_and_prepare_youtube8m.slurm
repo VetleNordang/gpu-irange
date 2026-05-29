@@ -2,9 +2,9 @@
 #
 # IDUN Data Preparation Job: Download and convert YouTube-8M (all 4 sizes)
 #
-# Produces 1M, 2M, 4M, and 8M vector partitions for both:
-#   video-RGB  (1024-dim)  →  executable_data/video/{1m,2m,4m,8m}/
-#   audio      ( 128-dim)  →  executable_data/audi/{1m,2m,4m,8m}/
+# Produces 1M, 2M, 4M, and 6M vector partitions for both:
+#   video-RGB  (1024-dim)  →  executable_data/video/{1m,2m,4m,6m}/
+#   audio      ( 128-dim)  →  executable_data/audi/{1m,2m,4m,6m}/
 #
 # Disk usage:
 #   Scratch ($USERWORK) during job : ~68 GB  (TFRecords + temp, auto-deleted)
@@ -81,32 +81,20 @@ fi
 #   - Deletes raw TFRecords and temp files when done
 #
 echo ""
-echo "--- Step 2: Download and convert (1M, 2M, 4M, 8M) ---"
+echo "--- Step 2: Convert TFRecords to .bin (1M, 2M, 4M, 6M) ---"
 
-python3 "$REPO_DIR/python/youtube8m/convert_youtube8m_to_irangegraph.py" \
-    --raw_dir     "$RAW_DIR"                        \
-    --out_root    "$REPO_DIR/executable_data"         \
-    --sizes       "1000000,2000000,4000000,8000000"  \
-    --num_queries 1000                               \
-    --chunk_size  500000                             \
-    --mirror      us
+python3 "$REPO_DIR/python/prep_attribute/convert_yt8m.py"
 
 if [ $? -ne 0 ]; then
     echo "ERROR: Conversion failed."
     exit 1
 fi
 
-# ── Step 3: Verify output ─────────────────────────────────────────────────────
-echo ""
-echo "--- Step 3: Verifying output files ---"
-
-python3 "$REPO_DIR/python/youtube8m/check_yt8m_bins.py"
-
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "--- Generated files ---"
 for modality in video audi; do
-    for size in 1m 2m 4m 8m; do
+    for size in 1m 2m 4m 6m; do
         DIR="$REPO_DIR/executable_data/$modality/$size"
         if [ -d "$DIR" ]; then
             echo "$modality/$size:"

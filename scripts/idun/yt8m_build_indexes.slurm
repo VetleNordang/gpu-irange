@@ -3,8 +3,8 @@
 # IDUN Build Job: iRangeGraph indexes for YouTube-8M (all 4 sizes)
 #
 # Builds one index per partition per modality (8 indexes total):
-#   video  1m / 2m / 4m / 8m   (1024-dim RGB)
-#   audi   1m / 2m / 4m / 8m   ( 128-dim audio)
+#   video  1m / 2m / 4m / 6m   (1024-dim RGB)
+#   audi   1m / 2m / 4m / 6m   ( 128-dim audio)
 #
 # Skips any index that already exists.
 # Submit via submit_yt8m_pipeline.sh — do not submit this directly.
@@ -94,7 +94,7 @@ build_index() {
 }
 
 # ── Build all indexes ─────────────────────────────────────────────────────────
-for SIZE in 1m 2m 4m 8m; do
+for SIZE in 1m 2m 4m 6m; do
 
     build_index "video $SIZE" \
         "executable_data/video/$SIZE/youtube_rgb_$SIZE.bin" \
@@ -112,7 +112,7 @@ echo "=========================================="
 echo "Index build complete: $(date)"
 echo ""
 echo "Indexes:"
-for SIZE in 1m 2m 4m 8m; do
+for SIZE in 1m 2m 4m 6m; do
     for MOD in video audi; do
         case "$MOD" in
             video) IDX="executable_data/video/$SIZE/youtube_rgb_$SIZE.index" ;;

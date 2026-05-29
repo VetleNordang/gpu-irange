@@ -24,7 +24,7 @@ resolve_dataset() {
             D_PQ_MODEL="$DATA_ROOT/gist1m/$size/pq/gist_${size}_pq_m320_nb9.faiss"
             D_PQ_CODES="$DATA_ROOT/gist1m/$size/pq/gist_${size}_pq_codes_m320_nb9.bin"
             ;;
-        video1m|video2m|video4m|video8m)
+        video1m|video2m|video4m|video6m)
             local size="${key#video}"
             D_DATA="$DATA_ROOT/video/$size/youtube_rgb_$size.bin"
             D_QUERY="$DATA_ROOT/video/$size/youtube_rgb_query.bin"
@@ -36,7 +36,7 @@ resolve_dataset() {
             D_PQ_MODEL="$DATA_ROOT/video/$size/pq/video_${size}_pq_m256_nb9.faiss"
             D_PQ_CODES="$DATA_ROOT/video/$size/pq/video_${size}_pq_codes_m256_nb9.bin"
             ;;
-        audi1m|audi2m|audi4m|audi8m)
+        audi1m|audi2m|audi4m|audi6m)
             local size="${key#audi}"
             D_DATA="$DATA_ROOT/audi/$size/yt_aud_$size.bin"
             D_QUERY="$DATA_ROOT/audi/$size/yt_aud_query.bin"

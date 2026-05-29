@@ -10,6 +10,7 @@
 #include <chrono>
 #include <map>
 #include <tuple>
+#include <unordered_set>
 #include <cuda_profiler_api.h>
 #include "iRG_search.h"
 #include <curand_kernel.h>
@@ -424,10 +425,10 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             size_t peak_vram_mb = vram_used_mb + lmem_total / (1024 * 1024);
 
             // Reset visited counters for new search
-            unsigned short* temp_curV = new unsigned short[query_nb];
+            uint8_t* temp_curV = new uint8_t[query_nb];
             for (int i = 0; i < query_nb; i++) temp_curV[i] = 1;
-            cudaMemcpy(visited.d_curV, temp_curV, query_nb * sizeof(unsigned short), cudaMemcpyHostToDevice);
-            cudaMemset(visited.d_mass, 0, (size_t)query_nb * max_elements * sizeof(unsigned short));
+            cudaMemcpy(visited.d_curV, temp_curV, query_nb * sizeof(uint8_t), cudaMemcpyHostToDevice);
+            cudaMemset(visited.d_mass, 0, (size_t)query_nb * max_elements * sizeof(uint8_t));
             delete[] temp_curV;
 
             // Reset result buffer to -1 before each search so stale results from prior EF don't leak
@@ -474,28 +475,25 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             float recall10 = 0.0f, recall50 = 0.0f, recall100 = 0.0f;
             if (index.storage->groundtruth.count(suffix)) {
                 auto &gt = index.storage->groundtruth[suffix];
+                int tp10 = 0, tp50 = 0, tp100 = 0;
                 for (int i = 0; i < query_nb; i++) {
-                    int tp10 = 0, tp50 = 0, tp100 = 0;
-                    for (int k = 0; k < query_K; k++) {
-                        int result_id = cpu_results[i * query_K + k];
-                        if (result_id == -1) continue;
-                        bool in_gt = std::find(gt[i].begin(), gt[i].end(), result_id) != gt[i].end();
-                        if (in_gt) {
-                            if (k < 10)  tp10++;
-                            if (k < 50)  tp50++;
-                            tp100++;
-                        }
-                    }
                     int gt10  = std::min((int)gt[i].size(), 10);
                     int gt50  = std::min((int)gt[i].size(), 50);
                     int gt100 = std::min((int)gt[i].size(), 100);
-                    if (gt10  > 0) recall10  += (float)tp10  / gt10;
-                    if (gt50  > 0) recall50  += (float)tp50  / gt50;
-                    if (gt100 > 0) recall100 += (float)tp100 / gt100;
+                    // GT is stored worst-first; true top-K nearest are the last K entries
+                    auto gt_end = gt[i].end();
+                    std::unordered_set<int> seen;
+                    for (int k = 0; k < query_K; k++) {
+                        int result_id = cpu_results[i * query_K + k];
+                        if (result_id == -1 || !seen.insert(result_id).second) continue;
+                        if (std::find(gt_end - gt10,  gt_end, result_id) != gt_end) tp10++;
+                        if (std::find(gt_end - gt50,  gt_end, result_id) != gt_end) tp50++;
+                        if (std::find(gt_end - gt100, gt_end, result_id) != gt_end) tp100++;
+                    }
                 }
-                recall10  /= query_nb;
-                recall50  /= query_nb;
-                recall100 /= query_nb;
+                recall10  = (float)tp10  / query_nb / 10;
+                recall50  = (float)tp50  / query_nb / 50;
+                recall100 = (float)tp100 / query_nb / 100;
             }
 
             // Calculate metrics

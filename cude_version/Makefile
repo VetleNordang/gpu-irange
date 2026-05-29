@@ -78,14 +78,14 @@ ARGS = --data_path $(PROJECT_ROOT)/executable_data/gist1m/500k/gist_base_500k.bi
 # 		--M_compression_spaces 320 \
 # 		--graph_M 32
 
-PQ_ARGS = --data_path_comp $(PROJECT_ROOT)/executable_data/audi/1m/yt_aud_1m.bin \
-		--query_path $(PROJECT_ROOT)/executable_data/audi/1m/yt_aud_query.bin \
-		--index_path $(PROJECT_ROOT)/executable_data/audi/1m/yt_aud_1m.index \
-		--result_saveprefix $(PROJECT_ROOT)/executable_data/audi/1m/results/results_pq \
-		--range_saveprefix $(PROJECT_ROOT)/executable_data/audi/1m/query_ranges/qr \
-		--groundtruth_saveprefix $(PROJECT_ROOT)/executable_data/audi/1m/groundtruth/gt \
-		--pq_model_out $(PROJECT_ROOT)/executable_data/audi/1m/pq/audi_1m_pq_m32_nb9.faiss \
-		--pq_codes_out $(PROJECT_ROOT)/executable_data/audi/1m/pq/audi_1m_pq_codes_m32_nb9.bin \
+PQ_ARGS = --data_path_comp $(PROJECT_ROOT)/executable_data/audi/2m/yt_aud_2m.bin \
+		--query_path $(PROJECT_ROOT)/executable_data/audi/2m/yt_aud_query.bin \
+		--index_path $(PROJECT_ROOT)/executable_data/audi/2m/yt_aud_2m.index \
+		--result_saveprefix $(PROJECT_ROOT)/executable_data/audi/2m/results/results_pq \
+		--range_saveprefix $(PROJECT_ROOT)/executable_data/audi/2m/query_ranges/qr \
+		--groundtruth_saveprefix $(PROJECT_ROOT)/executable_data/audi/2m/groundtruth/gt \
+		--pq_model_out $(PROJECT_ROOT)/executable_data/audi/2m/pq/audi_2m_pq_m32_nb9.faiss \
+		--pq_codes_out $(PROJECT_ROOT)/executable_data/audi/2m/pq/audi_2m_pq_codes_m32_nb9.bin \
 		--M_compression_spaces 32 \
 		--graph_M 32
 

@@ -363,9 +363,7 @@ namespace iRangeGraph
                 std::vector<int> HOP;
                 std::vector<int> DCO;
                 std::vector<float> QPS;
-                std::vector<float> RECALL10;
-                std::vector<float> RECALL50;
-                std::vector<float> RECALL100;
+                std::vector<float> RECALL10, RECALL50, RECALL100;
 
                 outfile << "SearchEF,Recall@10,Recall@50,Recall@100,QPS,DCO,HOP,RAM_MB\n";
                 std::cout << "suffix = " << suffix << std::endl;
@@ -375,10 +373,10 @@ namespace iRangeGraph
 
                     metric_hops = 0;
                     metric_distance_computations = 0;
+
                     timeval t1, t2;
                     gettimeofday(&t1, NULL);
-
-                    #pragma omp parallel for reduction(+:tp10,tp50,tp100)
+                    #pragma omp parallel for reduction(+:tp10) reduction(+:tp50) reduction(+:tp100)
                     for (int i = 0; i < storage->query_nb; i++)
                     {
                         auto rp = range.second[i];
@@ -387,35 +385,32 @@ namespace iRangeGraph
                         std::vector<TreeNode *> filterednodes = tree->range_filter(tree->root, ql, qr);
                         std::priority_queue<PFI> res = TopDown_nodeentries_search(filterednodes, storage->query_points[i].data(), ef, storage->query_K, ql, qr, edge_limit);
 
-                        // Queue is max-heap (worst first). Drain into vector to get rank order (best first).
-                        std::vector<int> ranked;
-                        ranked.reserve(res.size());
-                        while (!res.empty()) { ranked.push_back(res.top().second); res.pop(); }
-                        std::reverse(ranked.begin(), ranked.end());
+                        // GT is worst-first; true top-K are the last K entries
+                        int gt_size = (int)gt[i].size();
+                        int k10  = std::min(gt_size, 10);
+                        int k50  = std::min(gt_size, 50);
+                        int k100 = std::min(gt_size, 100);
+                        auto gt_end = gt[i].end();
 
-                        int gt10  = std::min((int)gt[i].size(), 10);
-                        int gt50  = std::min((int)gt[i].size(), 50);
-                        int gt100 = std::min((int)gt[i].size(), 100);
-                        int local10 = 0, local50 = 0, local100 = 0;
-                        for (int k = 0; k < (int)ranked.size(); k++) {
-                            bool in_gt = std::find(gt[i].begin(), gt[i].end(), ranked[k]) != gt[i].end();
-                            if (in_gt) {
-                                if (k < 10)  local10++;
-                                if (k < 50)  local50++;
-                                local100++;
-                            }
+                        std::map<int, int> record;
+                        while (!res.empty())
+                        {
+                            auto x = res.top().second;
+                            res.pop();
+                            if (record.count(x))
+                                throw Exception("repetitive search results");
+                            record[x] = 1;
+                            if (std::find(gt_end - k10,  gt_end, x) != gt_end) tp10++;
+                            if (std::find(gt_end - k50,  gt_end, x) != gt_end) tp50++;
+                            if (std::find(gt_end - k100, gt_end, x) != gt_end) tp100++;
                         }
-                        if (gt10  > 0) tp10  += local10;
-                        if (gt50  > 0) tp50  += local50;
-                        if (gt100 > 0) tp100 += local100;
                     }
-
                     gettimeofday(&t2, NULL);
                     float searchtime = GetTime(t1, t2);
 
-                    float recall10  = (float)tp10  / storage->query_nb / std::min(storage->query_K, 10);
-                    float recall50  = (float)tp50  / storage->query_nb / std::min(storage->query_K, 50);
-                    float recall100 = (float)tp100 / storage->query_nb / std::min(storage->query_K, 100);
+                    float recall10  = (float)tp10  / storage->query_nb / 10;
+                    float recall50  = (float)tp50  / storage->query_nb / 50;
+                    float recall100 = (float)tp100 / storage->query_nb / 100;
                     float qps = storage->query_nb / searchtime;
                     float dco = metric_distance_computations * 1.0 / storage->query_nb;
                     float hop = metric_hops * 1.0 / storage->query_nb;
@@ -433,7 +428,8 @@ namespace iRangeGraph
 
                 for (int i = 0; i < (int)RECALL10.size(); i++)
                 {
-                    outfile << SearchEF[i] << "," << RECALL10[i] << "," << RECALL50[i] << "," << RECALL100[i]
+                    outfile << SearchEF[i]
+                            << "," << RECALL10[i] << "," << RECALL50[i] << "," << RECALL100[i]
                             << "," << QPS[i] << "," << DCO[i] << "," << HOP[i] << "," << ram_mb << std::endl;
                 }
                 outfile.close();

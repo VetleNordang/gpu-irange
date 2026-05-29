@@ -73,7 +73,7 @@ build_gist() {
 }
 
 build_audi() {
-    for SIZE in 1m 2m 4m 8m; do
+    for SIZE in 1m 2m 4m 6m; do
         build_index "audi $SIZE" \
             "$DATA_ROOT/audi/$SIZE/yt_aud_$SIZE.bin" \
             "$DATA_ROOT/audi/$SIZE/yt_aud_$SIZE.index"
@@ -81,7 +81,7 @@ build_audi() {
 }
 
 build_video() {
-    for SIZE in 1m 2m 4m 8m; do
+    for SIZE in 1m 2m 4m 6m; do
         build_index "video $SIZE" \
             "$DATA_ROOT/video/$SIZE/youtube_rgb_$SIZE.bin" \
             "$DATA_ROOT/video/$SIZE/youtube_rgb_$SIZE.index"
@@ -108,11 +108,11 @@ for SIZE in 250k 500k 750k 1000k; do
     f="$DATA_ROOT/gist1m/$SIZE/gist_${SIZE}.index"
     [ -f "$f" ] && echo "  [OK] gist $SIZE" || echo "  [--] gist $SIZE"
 done
-for SIZE in 1m 2m 4m 8m; do
+for SIZE in 1m 2m 4m 6m; do
     f="$DATA_ROOT/audi/$SIZE/yt_aud_$SIZE.index"
     [ -f "$f" ] && echo "  [OK] audi $SIZE" || echo "  [--] audi $SIZE"
 done
-for SIZE in 1m 2m 4m 8m; do
+for SIZE in 1m 2m 4m 6m; do
     f="$DATA_ROOT/video/$SIZE/youtube_rgb_$SIZE.index"
     [ -f "$f" ] && echo "  [OK] video $SIZE" || echo "  [--] video $SIZE"
 done

@@ -152,8 +152,7 @@ fi
 if [ "$DO_YOUTUBE" -eq 1 ]; then
     log_header "YouTube-8M video+audio (~68 GB download, 1M partition)"
 
-    CONVERT_SCRIPT="$PYTHON_DIR/youtube8m/convert_youtube8m_to_irangegraph.py"
-    CHECK_SCRIPT="$PYTHON_DIR/youtube8m/check_yt8m_bins.py"
+    CONVERT_SCRIPT="$PYTHON_DIR/prep_attribute/convert_yt8m.py"
 
     if [ ! -f "$CONVERT_SCRIPT" ]; then
         log_error "Conversion script not found: $CONVERT_SCRIPT"
@@ -184,23 +183,9 @@ if [ "$DO_YOUTUBE" -eq 1 ]; then
         echo "" | tee -a "$LOG_FILE"
 
         "$PYTHON" "$CONVERT_SCRIPT" \
-            --raw_dir     "$RAW_DIR" \
-            --out_root    "$DATA_ROOT" \
-            --sizes       "1000000" \
-            --num_queries 1000 \
-            --chunk_size  500000 \
-            --mirror      us \
             2>&1 | tee -a "$LOG_FILE"
 
         log_success "YouTube-8M conversion complete"
-        rm -rf "$RAW_DIR"
-        log_info "Removed temporary TFRecord files"
-    fi
-
-    # ── Step 3: verify ────────────────────────────────────────────────────────
-    if [ -f "$CHECK_SCRIPT" ]; then
-        log_info "Verifying output files ..."
-        "$PYTHON" "$CHECK_SCRIPT" 2>&1 | tee -a "$LOG_FILE"
     fi
 
     echo "" | tee -a "$LOG_FILE"

@@ -91,8 +91,8 @@ DATASETS_TO_PROCESS=()
 if [ $# -eq 0 ] || [ "$1" == "all" ]; then
     DATASETS_TO_PROCESS=(
         "gist1m:250k" "gist1m:500k" "gist1m:750k" "gist1m:1000k"
-        "video:1m" "video:2m" "video:4m" "video:8m"
-        "audi:1m"  "audi:2m"  "audi:4m"  "audi:8m"
+        "video:1m" "video:2m" "video:4m" "video:6m"
+        "audi:1m"  "audi:2m"  "audi:4m"  "audi:6m"
     )
 elif [ "$1" == "gist1m" ]; then
     if [ $# -eq 1 ]; then
@@ -102,13 +102,13 @@ elif [ "$1" == "gist1m" ]; then
     fi
 elif [ "$1" == "video" ]; then
     if [ $# -eq 1 ]; then
-        DATASETS_TO_PROCESS=("video:1m" "video:2m" "video:4m" "video:8m")
+        DATASETS_TO_PROCESS=("video:1m" "video:2m" "video:4m" "video:6m")
     else
         DATASETS_TO_PROCESS=("video:$2")
     fi
 elif [ "$1" == "audi" ]; then
     if [ $# -eq 1 ]; then
-        DATASETS_TO_PROCESS=("audi:1m" "audi:2m" "audi:4m" "audi:8m")
+        DATASETS_TO_PROCESS=("audi:1m" "audi:2m" "audi:4m" "audi:6m")
     else
         DATASETS_TO_PROCESS=("audi:$2")
     fi
