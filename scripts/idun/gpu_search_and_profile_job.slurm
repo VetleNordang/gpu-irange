@@ -13,6 +13,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
 #SBATCH --gres=gpu:1
+#SBATCH --constraint="gpu80g"
 #SBATCH --job-name="irange_gpu_profile"
 #SBATCH --output=logs/gpu_search_profile_%j.log
 #SBATCH --mail-user=nordang.vetle@gmail.com
