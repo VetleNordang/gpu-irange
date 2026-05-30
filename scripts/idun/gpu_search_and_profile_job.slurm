@@ -13,7 +13,6 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
 #SBATCH --gres=gpu:1
-#SBATCH --constraint="gpu80g"
 #SBATCH --job-name="irange_gpu_profile"
 #SBATCH --output=logs/gpu_search_profile_%j.log
 #SBATCH --mail-user=nordang.vetle@gmail.com
@@ -93,7 +92,6 @@ bash scripts/run_searches.sh --mode gpu_root
 echo ""
 echo "=== Profiling ==="
 
-HW="NVIDIA H100 80GB HBM3"
 PROFILE_DATASETS=(audi1m video1m)
 PROFILE_SUFFIXES=(2 5 8)
 
@@ -107,13 +105,6 @@ for DATASET in "${PROFILE_DATASETS[@]}"; do
             --suffixes "${PROFILE_SUFFIXES[*]}"
     done
 done
-
-# ============================================================
-# Regenerate all plots
-# ============================================================
-echo ""
-echo "=== Regenerating plots ==="
-bash scripts/regenerate_plots.sh --env idun --hardware "$HW"
 
 echo ""
 echo "=== Job finished: $(date) ==="
