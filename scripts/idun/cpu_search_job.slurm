@@ -44,7 +44,7 @@ cd ..
 echo "Build complete."
 
 echo "--- parallel run ---"
-bash scripts/run_searches.sh --mode cpu_parallel
+bash scripts/run_searches.sh --mode cpu_parallel --runs 1
 
 echo "=========================================="
 echo "CPU Search completed: $(date)"

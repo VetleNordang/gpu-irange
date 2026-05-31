@@ -95,7 +95,10 @@ def aggregate_mode_dir(mode_dir: Path) -> bool:
 
         out_path = out_dir / csv_name
         agg.to_csv(out_path, index=False, float_format="%.6f")
-        print(f"    → {out_path.relative_to(PROJECT_ROOT)}")
+        try:
+            print(f"    → {out_path.relative_to(PROJECT_ROOT)}")
+        except ValueError:
+            print(f"    → {out_path}")
 
     return True
 
@@ -129,7 +132,10 @@ def main():
         if not mode_dir.is_dir():
             print(f"ERROR: not a directory: {mode_dir}", file=sys.stderr)
             sys.exit(1)
-        print(f"{mode_dir.relative_to(PROJECT_ROOT)}")
+        try:
+            print(f"{mode_dir.relative_to(PROJECT_ROOT)}")
+        except ValueError:
+            print(f"{mode_dir}")
         aggregate_mode_dir(mode_dir)
 
 
