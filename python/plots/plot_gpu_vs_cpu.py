@@ -49,18 +49,18 @@ DATASETS = [
     {"key": "video1m",   "name": "YouTube Video 1M", "family": "video", "size": 1_000_000, "path": "video/1m"},
     {"key": "video2m",   "name": "YouTube Video 2M", "family": "video", "size": 2_000_000, "path": "video/2m"},
     {"key": "video4m",   "name": "YouTube Video 4M", "family": "video", "size": 4_000_000, "path": "video/4m"},
-    {"key": "video8m",   "name": "YouTube Video 8M", "family": "video", "size": 8_000_000, "path": "video/8m"},
+    {"key": "video6m",   "name": "YouTube Video 6M", "family": "video", "size": 6_000_000, "path": "video/6m"},
     {"key": "audi1m",    "name": "YouTube Audio 1M", "family": "audi",  "size": 1_000_000, "path": "audi/1m"},
     {"key": "audi2m",    "name": "YouTube Audio 2M", "family": "audi",  "size": 2_000_000, "path": "audi/2m"},
     {"key": "audi4m",    "name": "YouTube Audio 4M", "family": "audi",  "size": 4_000_000, "path": "audi/4m"},
-    {"key": "audi8m",    "name": "YouTube Audio 8M", "family": "audi",  "size": 8_000_000, "path": "audi/8m"},
+    {"key": "audi6m",    "name": "YouTube Audio 6M", "family": "audi",  "size": 6_000_000, "path": "audi/6m"},
 ]
 
 METHODS = [
     {"key": "cpu_serial",   "label": "CPU-S",      "color": "tab:gray",   "default": False},
     {"key": "cpu_parallel", "label": "CPU-P",      "color": "tab:blue",   "default": True},
-    {"key": "gpu_normal",   "label": "GPU Normal", "color": "tab:orange", "default": True},
-    {"key": "gpu_pq",       "label": "GPU PQ",     "color": "tab:green",  "default": True},
+    {"key": "gpu_normal",   "label": "GPU-Exact",  "color": "tab:orange", "default": True},
+    {"key": "gpu_pq",       "label": "GPU-PQ",     "color": "tab:green",  "default": True},
     {"key": "gpu_root",     "label": "GPU Root",   "color": "tab:purple", "default": False},
 ]
 
@@ -273,18 +273,19 @@ def plot_faceted(name, data, methods, kind, out_path, title, hw_label="", ranges
     _save(fig, out_path)
 
 
-def plot_speedup(name, data, out_path, title, hw_label="", ranges=None):
+def plot_speedup(name, data, out_path, title, hw_label="", ranges=None, numerator_key="gpu_normal"):
     active_ranges = ranges or RANGES
     cpu = data.get("cpu_parallel")
-    gpu = data.get("gpu_normal")
-    if cpu is None or gpu is None:
-        print(f"  skip {out_path.name}: need cpu_parallel and gpu_normal")
+    num = data.get(numerator_key)
+    if cpu is None or num is None:
+        print(f"  skip {out_path.name}: need cpu_parallel and {numerator_key}")
         return
+    num_label = next((m["label"] for m in METHODS if m["key"] == numerator_key), numerator_key)
     fig, ax = plt.subplots(figsize=(8, 5.5))
     drew = False
     for rng in active_ranges:
         c = cpu[cpu["range"] == rng].set_index("SearchEF")["QPS"]
-        g = gpu[gpu["range"] == rng].set_index("SearchEF")["QPS"]
+        g = num[num["range"] == rng].set_index("SearchEF")["QPS"]
         common = c.index.intersection(g.index)
         if common.empty:
             continue
@@ -300,11 +301,11 @@ def plot_speedup(name, data, out_path, title, hw_label="", ranges=None):
     ax.axhline(1.0, color="black", lw=0.8, ls=":")
     ax.set_xscale("log")
     ax.set_xlabel("SearchEF")
-    ax.set_ylabel("Speedup  (GPU Normal QPS / CPU-P QPS)")
+    ax.set_ylabel(f"Speedup  ({num_label} QPS / CPU-P QPS)")
     ax.grid(True, which="both", alpha=0.3)
     ax.legend()
     if title:
-        t = f"{name} — {hw_label}: GPU Normal speedup over CPU-P" if hw_label else f"{name}: GPU Normal speedup over CPU-P"
+        t = f"{name} — {hw_label}: {num_label} speedup over CPU-P" if hw_label else f"{name}: {num_label} speedup over CPU-P"
         ax.set_title(t, fontsize=12, fontweight="bold")
     fig.tight_layout()
     _save(fig, out_path)
@@ -387,6 +388,9 @@ def main():
                    help="Target SearchEF for the summary figure (default 100).")
     p.add_argument("--summary-range", type=int, default=5, choices=RANGES,
                    help="Range used for the summary figure (default 5).")
+    p.add_argument("--speedup-numerator", default="gpu_normal",
+                   help="Method key used as the speedup numerator (default: gpu_normal). "
+                        "E.g. --speedup-numerator gpu_pq compares GPU-PQ vs CPU-P.")
     p.add_argument("--copy-to-thesis", action="store_true",
                    help="Copy output figures into thesis/Master/figs/results/{dataset}/.")
 
@@ -429,6 +433,10 @@ def main():
     if unknown_ranges:
         p.error(f"Unknown range(s): {unknown_ranges}. Valid: {RANGES}")
 
+    valid_keys = {m["key"] for m in METHODS}
+    if args.speedup_numerator not in valid_keys:
+        p.error(f"--speedup-numerator must be one of: {', '.join(sorted(valid_keys))}")
+
     valid_metrics = {"qps", "tradeoff", "speedup"}
     metrics = [m.strip() for m in args.metrics.split(",")]
     unknown_metrics = [m for m in metrics if m not in valid_metrics]
@@ -461,9 +469,12 @@ def main():
             plot_faceted(d["name"], data, methods, "tradeoff",
                          figures[-1], args.title, args.hardware, ranges=active_ranges)
         if "speedup" in metrics:
-            figures.append(out / f"speedup_comparison{suffix}.png")
+            num_key = args.speedup_numerator
+            num_slug = num_key.replace("_", "-")
+            figures.append(out / f"speedup_{num_slug}_vs_cpu{suffix}.png")
             plot_speedup(d["name"], data,
-                         figures[-1], args.title, args.hardware, ranges=active_ranges)
+                         figures[-1], args.title, args.hardware, ranges=active_ranges,
+                         numerator_key=num_key)
         if args.copy_to_thesis:
             for fig_path in figures:
                 if fig_path.exists():

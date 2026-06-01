@@ -35,7 +35,7 @@ FAMILIES = [
             {"label": "1M",  "path": "audi/1m"},
             {"label": "2M",  "path": "audi/2m"},
             {"label": "4M",  "path": "audi/4m"},
-            {"label": "8M",  "path": "audi/8m"},
+            {"label": "6M",  "path": "audi/6m"},
         ],
     },
     {
@@ -45,7 +45,7 @@ FAMILIES = [
             {"label": "1M",  "path": "video/1m"},
             {"label": "2M",  "path": "video/2m"},
             {"label": "4M",  "path": "video/4m"},
-            {"label": "8M",  "path": "video/8m"},
+            {"label": "6M",  "path": "video/6m"},
         ],
     },
     {

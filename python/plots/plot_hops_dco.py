@@ -37,11 +37,11 @@ DATASETS = [
     {"key": "video1m",   "name": "YouTube Video 1M",  "path": "video/1m"},
     {"key": "video2m",   "name": "YouTube Video 2M",  "path": "video/2m"},
     {"key": "video4m",   "name": "YouTube Video 4M",  "path": "video/4m"},
-    {"key": "video8m",   "name": "YouTube Video 8M",  "path": "video/8m"},
+    {"key": "video6m",   "name": "YouTube Video 6M",  "path": "video/6m"},
     {"key": "audi1m",    "name": "YouTube Audio 1M",  "path": "audi/1m"},
     {"key": "audi2m",    "name": "YouTube Audio 2M",  "path": "audi/2m"},
     {"key": "audi4m",    "name": "YouTube Audio 4M",  "path": "audi/4m"},
-    {"key": "audi8m",    "name": "YouTube Audio 8M",  "path": "audi/8m"},
+    {"key": "audi6m",    "name": "YouTube Audio 6M",  "path": "audi/6m"},
 ]
 
 ALL_METHODS = [

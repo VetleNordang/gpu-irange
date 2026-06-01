@@ -31,7 +31,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent / "executable_data"
+BASE_DIR_P100 = Path(__file__).resolve().parent.parent.parent / "executable_data"
+BASE_DIR_IDUN = Path(__file__).resolve().parent.parent.parent / "temp_idun_results"
+BASE_DIR      = BASE_DIR_P100  # overridden by --idun flag
 
 DATASETS = [
     {"key": "gist250k",  "name": "GIST1M 250k",      "path": "gist1m/250k"},
@@ -41,11 +43,11 @@ DATASETS = [
     {"key": "video1m",   "name": "YouTube Video 1M",  "path": "video/1m"},
     {"key": "video2m",   "name": "YouTube Video 2M",  "path": "video/2m"},
     {"key": "video4m",   "name": "YouTube Video 4M",  "path": "video/4m"},
-    {"key": "video8m",   "name": "YouTube Video 8M",  "path": "video/8m"},
+    {"key": "video6m",   "name": "YouTube Video 6M",  "path": "video/6m"},
     {"key": "audi1m",    "name": "YouTube Audio 1M",  "path": "audi/1m"},
     {"key": "audi2m",    "name": "YouTube Audio 2M",  "path": "audi/2m"},
     {"key": "audi4m",    "name": "YouTube Audio 4M",  "path": "audi/4m"},
-    {"key": "audi8m",    "name": "YouTube Audio 8M",  "path": "audi/8m"},
+    {"key": "audi6m",    "name": "YouTube Audio 6M",  "path": "audi/6m"},
 ]
 
 METHODS = [
@@ -154,24 +156,26 @@ def _save(fig, path):
     print(f"  saved {path.relative_to(BASE_DIR)}")
 
 
-def plot_recall_vs_ef(name, data, out_path, hw_label=""):
+def plot_recall_vs_ef(name, data, out_path, hw_label="", only_top10=False, methods=METHODS):
     """One panel per range. Lines: one per method×threshold."""
+    thresholds = {"Recall@10": THRESHOLD_STYLE["Recall@10"]} if only_top10 else THRESHOLD_STYLE
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.8), sharey=True)
     drew = False
     for ax, rng in zip(axes, RANGES):
-        for m in METHODS:
+        for m in methods:
             df = data.get(m["key"])
             if df is None:
                 continue
             sub = df[df["range"] == rng].sort_values("SearchEF")
             if sub.empty:
                 continue
-            for thresh, style in THRESHOLD_STYLE.items():
+            for thresh, style in thresholds.items():
                 if thresh not in sub.columns:
                     continue
+                label = m["label"] if only_top10 else f"{m['label']} {style['label']}"
                 ax.plot(sub["SearchEF"], sub[thresh],
                         color=m["color"], ls=style["ls"], lw=1.6, marker="o", ms=3,
-                        label=f"{m['label']} {style['label']}")
+                        label=label)
                 drew = True
         ax.set_xscale("log")
         ax.set_ylim(0, 1.05)
@@ -195,13 +199,13 @@ def plot_recall_vs_ef(name, data, out_path, hw_label=""):
     _save(fig, out_path)
 
 
-def plot_recall_vs_qps(name, data, out_path, hw_label=""):
+def plot_recall_vs_qps(name, data, out_path, hw_label="", methods=METHODS):
     """Three panels (one per range). Recall@10 vs QPS for all methods."""
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.8), sharey=True)
     handles, labels = [], []
     drew = False
     for ax, rng in zip(axes, RANGES):
-        for m in METHODS:
+        for m in methods:
             df = data.get(m["key"])
             if df is None:
                 continue
@@ -238,7 +242,17 @@ def main():
     p.add_argument("--env", default=None, help="Suffix for output filenames (e.g. 'idun').")
     p.add_argument("--hardware", default="", help="Hardware label for figure titles.")
     p.add_argument("--aggregate", action="store_true", help="Re-run aggregate_results.py before plotting.")
+    p.add_argument("--only-top10", action="store_true", help="Recall vs EF plot shows only Recall@10.")
+    p.add_argument("--method", nargs="+", default=None,
+                   help="Restrict to these method keys, e.g. --method cpu_parallel gpu_normal")
+    src = p.add_mutually_exclusive_group()
+    src.add_argument("--idun", action="store_true", help="Use temp_idun_results as data root.")
+    src.add_argument("--p100", action="store_true", help="Use executable_data as data root (default).")
     args = p.parse_args()
+
+    global BASE_DIR
+    if args.idun:
+        BASE_DIR = BASE_DIR_IDUN
 
     if args.aggregate:
         agg_script = Path(__file__).resolve().parent.parent / "aggregate_results.py"
@@ -248,6 +262,13 @@ def main():
             print("Warning: aggregate_results.py exited with errors — plotting with existing data.")
 
     suffix = f"_{args.env}" if args.env else ""
+
+    methods = METHODS
+    if args.method:
+        methods = [m for m in METHODS if m["key"] in args.method]
+        if not methods:
+            print(f"No methods matched {args.method}. Valid keys: {[m['key'] for m in METHODS]}")
+            return
 
     datasets = DATASETS
     if args.dataset:
@@ -259,15 +280,17 @@ def main():
     for d in datasets:
         print(f"\n{d['name']}")
         results_dir = BASE_DIR / d["path"] / "results"
-        data = {m["key"]: load_method(results_dir / m["key"]) for m in METHODS}
+        data = {m["key"]: load_method(results_dir / m["key"]) for m in methods}
         if all(v is None for v in data.values()):
             print("  no data found — skipping")
             continue
         out = results_dir / "analysis"
         plot_recall_vs_ef(d["name"], data,
-                          out / f"recall_vs_ef{suffix}.png", args.hardware)
+                          out / f"recall_vs_ef{suffix}.png", args.hardware,
+                          only_top10=args.only_top10, methods=methods)
         plot_recall_vs_qps(d["name"], data,
-                           out / f"recall_vs_qps{suffix}.png", args.hardware)
+                           out / f"recall_vs_qps{suffix}.png", args.hardware,
+                           methods=methods)
 
     print("\ndone")
 

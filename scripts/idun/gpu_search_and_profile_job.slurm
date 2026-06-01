@@ -11,7 +11,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=64G
+#SBATCH --mem=128G
 #SBATCH --gres=gpu:1
 #SBATCH --constraint="gpu80g"
 #SBATCH --job-name="irange_gpu_profile"
