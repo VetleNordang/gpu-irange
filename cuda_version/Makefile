@@ -16,7 +16,7 @@ SOURCE = gpu_full.cu
 PQ_SOURCE = gpu_pq.cu
 ROOT_SOURCE = gpu_root.cu
 ROOT_TARGET = $(BUILD_DIR)/gpu_root
-HEADERS = gpu_search_updated.cuh gpu_search_pq.cuh gpu_pq_distance.cuh gpu_index.cuh gpu_heap.cuh gpu_visited.cuh ../include/iRG_search.h ../include/utils.h
+HEADERS = gpu_search_common.cuh gpu_search_updated.cuh gpu_search_pq.cuh gpu_pq_distance.cuh gpu_index.cuh gpu_pq_index.cuh gpu_heap.cuh gpu_visited.cuh ../include/iRG_search.h ../include/utils.h
 
 # FAISS support
 ENABLE_FAISS ?= 1

@@ -49,13 +49,13 @@ if(ENABLE_FAISS)
 
 		# TODO: gpu_pq_encode and gpu_irangegraph_search to be added later
 		# add_executable(gpu_pq_encode gpu_pq_encode.cu)
-		# target_include_directories(gpu_pq_encode PRIVATE ${FAISS_INCLUDE_DIR} ${PROJECT_SOURCE_DIR}/cude_version)
+		# target_include_directories(gpu_pq_encode PRIVATE ${FAISS_INCLUDE_DIR} ${PROJECT_SOURCE_DIR}/cuda_version)
 		# target_link_libraries(gpu_pq_encode PRIVATE ${FAISS_LIBRARY} ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES} OpenMP::OpenMP_CXX ${CUDA_LIBRARIES})
 		# set_target_properties(gpu_pq_encode PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 		
-		# GPU iRangeGraph Greedy Search (based on hello_clean.cu from cude_version)
+		# GPU iRangeGraph Greedy Search (based on hello_clean.cu from cuda_version)
 		# add_executable(gpu_irangegraph_search gpu_irangegraph_search.cu)
-		# target_include_directories(gpu_irangegraph_search PRIVATE ${PROJECT_SOURCE_DIR}/cude_version)
+		# target_include_directories(gpu_irangegraph_search PRIVATE ${PROJECT_SOURCE_DIR}/cuda_version)
 		# target_link_libraries(gpu_irangegraph_search PRIVATE ${CUDA_LIBRARIES})
 		# set_target_properties(gpu_irangegraph_search PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 endif()

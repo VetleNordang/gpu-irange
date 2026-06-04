@@ -11,7 +11,7 @@
 #include <queue>
 #include <cuda_runtime.h>
 #include <omp.h>
-#include "../cude_version/gpu_index.cuh"
+#include "../cuda_version/gpu_index.cuh"
 
 class Exception : public std::runtime_error
 {
@@ -321,7 +321,6 @@ namespace iRangeGraph
             treenodes.emplace_back(u);
             max_depth = std::max(max_depth, u->depth);
             int L = u->lbound, R = u->rbound;
-            size_t Len = R - L + 1;
             if (L == R)
                 return;
             int gap = (R - L + 1) / ways_;

@@ -140,27 +140,3 @@ __device__ float adc_distance_partial(
     return partial;
 }
 
-// Batch compute: optimized for multiple queries
-__device__ float gpu_compute_pq_distance_batch(
-    const float* query_vector,              // Single query (n*d floats)
-    const uint8_t* all_db_codes,           // All DB codes
-    const float* centroids,                 // All centroids
-    int db_id,                              // Which database vector
-    int M, int nbits, int dsub, int code_size, int ksub) {
-    
-    float distance_sq = 0.0f;
-    const uint8_t* db_code = all_db_codes + db_id * code_size;
-
-    for (int m = 0; m < M; ++m) {
-        uint32_t centroid_index = gpu_extract_centroid_index_direct(db_code, m, nbits);
-        const float* centroid = &centroids[m * ksub * dsub + centroid_index * dsub];
-        const float* query_m = query_vector + m * dsub;
-        
-        for (int d = 0; d < dsub; ++d) {
-            float diff = query_m[d] - centroid[d];
-            distance_sq += diff * diff;
-        }
-    }
-    
-    return distance_sq;
-}

@@ -14,7 +14,7 @@ class VisitedList {
     unsigned int numelements;
 
     VisitedList(int numelements1) {
-        curV = -1;
+        curV = (vl_type)-1;
         numelements = numelements1;
         mass = new vl_type[numelements];
     }

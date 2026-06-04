@@ -1,59 +1,13 @@
 #pragma once
 
-#include <cuda_runtime.h>
-#include <float.h>
-#include <stdint.h>
-#include "gpu_index.cuh"
-#include "gpu_visited.cuh"
-#include "gpu_heap.cuh"
+#include "gpu_search_common.cuh"
+#include "gpu_pq_index.cuh"
 #include "gpu_pq_distance.cuh"
 
-// Maximum SearchEF value supported
-#define MAX_SEARCH_EF 2000
-
-// NOTE: Helper functions (range_filter_gpu, getVectorByID, get_linklist_gpu, GetOverLap, SelectEdge_gpu, xorshift32)
-// are defined in gpu_search_updated.cuh. We rely on those definitions being available.
-// When both gpu_search_updated.cuh and this file are included in hello_pq.cu, 
-// those functions are only defined once.
-
-// ============ PQ Distance Computation ============
-// Full PQ distance for a single vector (single thread)
-__device__ float PQDistance(const float *query_vector, int db_vector_id,
-                            uint8_t* d_compressed_codes, float* d_centroids,
-                            int M, int nbits, int dsub, int code_size, int ksub) {
-    return gpu_compute_pq_distance(query_vector, d_compressed_codes, d_centroids,
-                                   db_vector_id, M, nbits, dsub, code_size, ksub);
-}
-
-// Partial PQ distance for cooperative groups
-// Each thread computes a subset of subspaces and returns partial sum
-__device__ float PQDistancePartial(const float *query_vector, int db_vector_id,
-                                   uint8_t* d_compressed_codes, float* d_centroids,
-                                   int M, int nbits, int dsub, int code_size, int ksub,
-                                   int lane_in_group, int threads_in_group) {
-    
-    float partial_dist = 0.0f;
-    
-    // Each thread in the group computes a strided subset of subspaces
-    for (int m = lane_in_group; m < M; m += threads_in_group) {
-        // Extract centroid index for this subspace
-        uint32_t centroid_index = gpu_extract_centroid_index(d_compressed_codes, m, nbits, code_size, db_vector_id);
-        
-        // Load centroid from GPU memory
-        const float* centroid = &d_centroids[m * ksub * dsub + centroid_index * dsub];
-        
-        // Compute squared L2 distance for this subspace
-        for (int d = 0; d < dsub; d++) {
-            float diff = query_vector[m * dsub + d] - centroid[d];
-            partial_dist += diff * diff;
-        }
-    }
-    
-    return partial_dist;
-}
 
 // ============ 128-thread PQ Search Kernel ============
 // Same architecture as normal kernel but with PQ distances
+#undef  THREADS_PER_QUERY
 #define THREADS_PER_QUERY     128
 #define MAX_QUERIES_PER_BLOCK   1
 
@@ -65,17 +19,19 @@ __device__ float PQDistancePartial(const float *query_vector, int db_vector_id,
 
 __global__ void irange_search_kernel_pq(
     GPUIndex gpu_index,
+    GPUPQParams pq,
     GPUVisitedArray visited,
     int query_nb,
     int SearchEF,
     int query_K,
     int dim,
     int suffix_id,
+    int num_suffixes,
     int* d_hops,
     int* d_dist_comps,
     size_t size_links_per_layer,
     unsigned long long seed,
-    HeapNode* d_heap_buf   // [query_nb * 2 * MAX_SEARCH_EF] — candidate then top-candidates per query
+    HeapNode* d_heap_buf
 ) {
     // --- Thread identity ---
     const int lane_id           = threadIdx.x % THREADS_PER_QUERY;
@@ -93,19 +49,19 @@ __global__ void irange_search_kernel_pq(
 
     // --- Per-query values ---
     float* query_vector = gpu_index.d_query_vectors + (long long)query_id * dim;
-    int    range_idx    = query_id * 22 + suffix_id * 2;  // 11 suffixes x 2 values
+    int    range_idx    = query_id * num_suffixes * 2 + suffix_id * 2;
     int    ql           = gpu_index.d_query_range[range_idx];
     int    qr           = gpu_index.d_query_range[range_idx + 1];
 
     // --- ADC distance table build (all 128 threads cooperate) ---
-    float* my_dist_table = gpu_index.d_dist_tables
-                         + (long long)query_id * gpu_index.pq_M * gpu_index.pq_ksub;
+    float* my_dist_table = pq.d_dist_tables
+                         + (long long)query_id * pq.pq_M * pq.pq_ksub;
 
     build_adc_table(
         query_vector,
-        gpu_index.d_centroids,
+        pq.d_centroids,
         my_dist_table,
-        gpu_index.pq_M, gpu_index.pq_ksub, gpu_index.pq_dsub,
+        pq.pq_M, pq.pq_ksub, pq.pq_dsub,
         threadIdx.x, blockDim.x);
 
     __syncthreads();  // all threads must finish building the table before any thread reads it
@@ -142,11 +98,11 @@ __global__ void irange_search_kernel_pq(
             markVisited(visited, query_id, entry_point);
 
             // ADC table lookup for entry point
-            const uint8_t* entry_code = gpu_index.d_compressed_codes
-                                      + (long long)entry_point * gpu_index.pq_code_size;
+            const uint8_t* entry_code = pq.d_compressed_codes
+                                      + (long long)entry_point * pq.pq_code_size;
             float entry_dist = adc_distance(
                 entry_code, my_dist_table,
-                gpu_index.pq_M, gpu_index.pq_nbits, gpu_index.pq_ksub);
+                pq.pq_M, pq.pq_nbits, pq.pq_ksub);
             
             dist_comp_count++;
 
@@ -191,7 +147,7 @@ __global__ void irange_search_kernel_pq(
                            size_links_per_layer,
                            visited, query_id,
                            s_edges[warp_in_blk], &s_num_edges[warp_in_blk],
-                           lane_id);
+                           lane_id, THREADS_PER_QUERY);
         }
         __syncthreads();
 
@@ -212,11 +168,11 @@ __global__ void irange_search_kernel_pq(
                 int neighbor_idx = edge_base + neighbor_slot;
                 int neighbor_id  = s_edges[warp_in_blk][neighbor_idx];
 
-                const uint8_t* nb_code = gpu_index.d_compressed_codes
-                                       + (long long)neighbor_id * gpu_index.pq_code_size;
+                const uint8_t* nb_code = pq.d_compressed_codes
+                                       + (long long)neighbor_id * pq.pq_code_size;
                 partial = adc_distance_partial(
                     nb_code, my_dist_table,
-                    gpu_index.pq_M, gpu_index.pq_nbits, gpu_index.pq_ksub,
+                    pq.pq_M, pq.pq_nbits, pq.pq_ksub,
                     lane_in_group, DIST_THREADS_PER_NEIGHBOR);
             }
 

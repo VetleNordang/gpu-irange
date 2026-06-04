@@ -132,7 +132,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         visited_list_pool_ = std::unique_ptr<VisitedListPool>(new VisitedListPool(1, max_elements));
 
         // initializations for special treatment of the first node
-        enterpoint_node_ = -1;
+        enterpoint_node_ = (tableint)-1;
         maxlevel_ = -1;
 
         linkLists_ = (char **) malloc(sizeof(void *) * max_elements_);
@@ -1225,7 +1225,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                         tableint *datal = (tableint *) (data + 1);
                         for (int i = 0; i < size; i++) {
                             tableint cand = datal[i];
-                            if (cand < 0 || cand > max_elements_)
+                            if (cand > max_elements_)
                                 throw std::runtime_error("cand error");
                             dist_t d = fstdistfunc_(data_point, getDataByInternalId(cand), dist_func_param_);
                             if (d < curdist) {
@@ -1289,7 +1289,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                 tableint *datal = (tableint *) (data + 1);
                 for (int i = 0; i < size; i++) {
                     tableint cand = datal[i];
-                    if (cand < 0 || cand > max_elements_)
+                    if (cand > max_elements_)
                         throw std::runtime_error("cand error");
                     dist_t d = fstdistfunc_(query_data, getDataByInternalId(cand), dist_func_param_);
 
@@ -1349,7 +1349,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                 tableint *datal = (tableint *) (data + 1);
                 for (int i = 0; i < size; i++) {
                     tableint cand = datal[i];
-                    if (cand < 0 || cand > max_elements_)
+                    if (cand > max_elements_)
                         throw std::runtime_error("cand error");
                     dist_t d = fstdistfunc_(query_data, getDataByInternalId(cand), dist_func_param_);
 

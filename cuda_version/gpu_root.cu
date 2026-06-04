@@ -307,7 +307,9 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
 
             unsigned long long kernel_seed = std::chrono::system_clock::now().time_since_epoch().count();
             irange_search_kernel<<<num_blocks, threads_per_block>>>(
-                gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx, d_hops, d_dist_comps,
+                gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx,
+                (int)storage->query_range.size(),
+                d_hops, d_dist_comps,
                 index.size_links_per_layer_, kernel_seed,
                 d_entry_ids, d_entry_dists, d_entry_counts
             );

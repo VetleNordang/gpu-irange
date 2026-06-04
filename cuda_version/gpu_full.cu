@@ -1,6 +1,3 @@
-// This program computer the sum of two N-element vectors using unified memory
-// By: Nick from CoffeeBeforeArch
-
 #include <stdio.h>
 #include <cassert>
 #include <iostream>
@@ -26,32 +23,6 @@ int profile_suffix = -1;
 
 using std::cout;
 std::unordered_map<std::string, std::string> paths;
-
-// Test kernel to demonstrate visited array
-__global__ void test_visited_array(GPUVisitedArray visited) {
-    int query_id = threadIdx.x;  // Each thread is a different query
-    
-    if (query_id < visited.num_queries) {
-        printf("\n=== Query %d Testing Visited Array ===\n", query_id);
-        
-        // Simulate visiting some nodes
-        int nodes_to_visit[] = {10, 25, 50, 100, 10};  // Note: 10 appears twice!
-        
-        for (int i = 0; i < 5; i++) {
-            int node = nodes_to_visit[i];
-            
-            // Check if already visited
-            if (isVisited(visited, query_id, node)) {
-                printf("  Node %d: Already visited! (skipping)\n", node);
-            } else {
-                printf("  Node %d: First time visiting (marking as visited)\n", node);
-                markVisited(visited, query_id, node);
-            }
-        }
-        
-        printf("=== Query %d Complete ===\n", query_id);
-    }
-}
 
 // Random number generation
 __device__ unsigned int hash_random(unsigned int x) {
@@ -443,7 +414,9 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             // Launch kernel
             unsigned long long kernel_seed = std::chrono::system_clock::now().time_since_epoch().count();
             irange_search_kernel<<<num_blocks, threads_per_block>>>(
-                gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx, d_hops, d_dist_comps,
+                gpu_index, visited, query_nb, ef, query_K, dim, suffix_idx,
+                (int)storage->query_range.size(),
+                d_hops, d_dist_comps,
                 index.size_links_per_layer_, kernel_seed,
                 d_entry_ids, d_entry_dists, d_entry_counts
             );
@@ -575,17 +548,6 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     if (gpu_index.d_results) cudaFree(gpu_index.d_results);
     
     printf("✓ GPU memory cleaned up\n");
-}
-
-// CUDA kernel for vector addition
-// No change when using CUDA unified memory
-__global__ void vectorAdd(int *a, int *b, int *c, int N) {
-    // Calculate global thread thread ID
-    int tid = (blockDim.x * blockIdx.x) + threadIdx.x;
-    // Boundary check
-    if (tid < N) {
-        c[tid] = a[tid] + b[tid];
-    }
 }
 
 int main(int argc, char **argv) {

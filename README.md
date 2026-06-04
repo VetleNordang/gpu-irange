@@ -1,105 +1,123 @@
 # iRangeGraph
-This repo is the implementation of [iRangeGraph: Improvising Range-dedicated Graphs for Range-filtering Nearest Neighbor Search](https://arxiv.org/abs/2409.02571)
 
-## Additional Guides
+This is a fork of [iRangeGraph](https://github.com/YuexuanXu7/iRangeGraph), the implementation of [iRangeGraph: Improvising Range-dedicated Graphs for Range-filtering Nearest Neighbor Search](https://arxiv.org/abs/2409.02571).
 
-- [FAISS Product Quantization (PQ) Integration Guide](README_FAISS_PQ.md)
-- [CPU-First PQ Setup Guide](README_PQ_CPU_FIRST.md)
+This fork extends the original with parallel CPU search and a GPU implementation using CUDA, developed as part of a Master's thesis at NTNU.
 
+## Build
 
-## Quick Start
-
-### Build
+### CPU
 
 ```bash
-mkdir build && cd build && cmake .. && make
+mkdir build && cd build && cmake .. && make -j$(nproc)
 ```
 
-### Construct Index
+With FAISS Product Quantization support:
 
-#### parameters:
-
-**`--data_path`**: The input data over which to build an index, in .bin format. The first 4 bytes represent number of points as integer. The next 4 bytes represent the dimension of data as integer. The following `n*d*sizeof(float)` bytes contain the contents of the data one data point in a time. 
-The data points should be already sorted in ascending order by the attribute.
-
-**`--index_file`**: The constructed index will be saved to this file, in .bin format.
-
-**`--M`**: The degree of the graph index.
-
-**`--ef_construction`**: The size of result set during index building.
-
-**`--threads`**: The number of threads for index building.
-
-
-#### command:
 ```bash
-./tests/buildindex --data_path [path to data points] --index_file [file path to save index] --M [integer] --ef_construction [integer] --threads [integer]
+cmake -DUSE_FAISS=ON -DFAISS_ROOT=/path/to/faiss .. && make -j$(nproc)
 ```
 
+### GPU
 
-### Search For Single-Attribute
+Requires CUDA and FAISS. Auto-detects GPU compute capability.
 
-#### parameters:
-
-**`--data_path`**: The data points over which the index is built, in .bin format. The first 4 bytes represent number of points as integer. The next 4 bytes represent the dimension of data as integer. The following `n*d*sizeof(float)` bytes contain the contents of the data one data point in a time.
-The data points should be already sorted in ascending order by the attribute.
-
-**`--query_path`**: The query vectors, in .bin format. The first 4 bytes represent number of points as integer. The next 4 bytes represent the dimension of data as integer. The following `n*d*sizeof(float)` bytes contain the contents of the query one query point in a time.
-
-**`--range_saveprefix`**: The path of folder where query range files will be saved. 0~9 denotes query range fractions ![formula](https://latex.codecogs.com/png.latex?2^0,2^{-1},...,2^{-9}) respectively, and 17 denotes mixed range fraction.
-
-**`--groundtruth_saveprefix`**: The path of folder where groundtruth files will be saved.
-
-**`--index_file`**: The file path where the constructed index is saved, in .bin format. 
-
-**`--result_saveprefix`**: The path of folder where result files will be saved.
-
-**`--M`**: The degree of the graph index. It should equal the 'M' used for constructing index.
-
-#### command:
 ```bash
-./tests/search --data_path [path to data points] --query_path [path to query points] --range_saveprefix [folder path to save query ranges] --groundtruth_saveprefix [folder path to save groundtruth] --index_file [path of the index file] --result_saveprefix [folder path to save results] --M [integer]
+cd cuda_version && make optimized_test
 ```
 
+To build the PQ-compressed GPU version:
 
-### Search For Multi-Attribute
-
-#### parameter:
-**`--data_path`**:  The data points over which the index is built, in .bin format. The first 4 bytes represent number of points as integer. The next 4 bytes represent the dimension of data as integer. The following `n*d*sizeof(float)` bytes contain the contents of the data one data point in a time.
-There is no need to pre-sort the data points by any attribute. Just make sure data points and attribute1 and attribute2 match one by one in order.
-
-**`--query_path`**: The query vectors, in .bin format. The first 4 bytes represent number of points as integer. The next 4 bytes represent the dimension of data as integer. The following `n*d*sizeof(float)` bytes contain the contents of the query one query point in a time.
-
-**`--range_saveprefix`**: The path of folder where query range files will be saved.
-
-**`--groundtruth_saveprefix`**: The path of folder where groundtruth files will be saved.
-
-**`--index_file`**: The file path where the constructed index is saved, which is built with data points sorted by the first attribute (See Construct Index, note that the data points should be pre-sorted by attribute1 when building the index).
-
-**`--result_saveprefix`**: The path of folder where result files will be saved.
-
-**`--attribute1_file`**: The path of the first attribute file, in .bin format. `n*sizeof(int)` bytes contain the first attributes of the data for one data point in a time.
-
-**`--attribute2_file`**: The path of the second attribute file, in .bin format. `n*sizeof(int)` bytes contain the second attributes of the data for one data point in a time.
-
-**`--M`**: The degree of the graph index. It should equal the 'M' used for constructing index by the first attribute.
-
-
-#### command:
 ```bash
-./tests/search_multi --data_path [path to data points] --query_path [path to query points] --range_saveprefix [folder path to save query ranges] --groundtruth_saveprefix [folder path to save groundtruth] --index_file [path of the index file] --result_saveprefix [folder path to save results] --attribute1 [path to first attributes] --attribute2 [path to second attributes] --M [integer]
+cd cuda_version && make pq_target
 ```
 
+## Construct Index
 
+#### Parameters
+
+**`--data_path`**: Input data in .bin format. First 4 bytes: number of points. Next 4 bytes: dimension. Remaining bytes: `n*d*sizeof(float)` floats, one point at a time. Data must be pre-sorted in ascending order by attribute.
+
+**`--index_file`**: Output path for the constructed index (.bin format).
+
+**`--M`**: Graph degree.
+
+**`--ef_construction`**: Size of the result set during index building.
+
+**`--threads`**: Number of threads for index building.
+
+#### Command
+
+```bash
+./tests/buildindex --data_path [path to data] --index_file [path to save index] --M [integer] --ef_construction [integer] --threads [integer]
+```
+
+## Search
+
+#### Parameters
+
+**`--data_path`**: Data points in .bin format (same as used for index construction).
+
+**`--query_path`**: Query vectors in .bin format.
+
+**`--index_file`**: Path to the constructed index.
+
+**`--range_saveprefix`**: Folder where query range files will be saved. 0–9 denote range fractions 2^0, 2^-1, ..., 2^-9; 17 denotes mixed range fraction.
+
+**`--groundtruth_saveprefix`**: Folder where groundtruth files will be saved.
+
+**`--result_saveprefix`**: Folder where result files will be saved.
+
+**`--M`**: Graph degree. Must match the value used during index construction.
+
+#### CPU search
+
+```bash
+./tests/search --data_path [path to data] --query_path [path to queries] --range_saveprefix [folder] --groundtruth_saveprefix [folder] --index_file [path to index] --result_saveprefix [folder] --M [integer]
+```
+
+#### GPU search
+
+```bash
+cd cuda_version && make run
+```
+
+Or run the binary directly:
+
+```bash
+./cuda_version/build/optimized_test --data_path [path to data] --query_path [path to queries] --range_saveprefix [folder] --groundtruth_saveprefix [folder] --index_file [path to index] --result_saveprefix [folder] --M [integer]
+```
+
+#### GPU search with PQ compression
+
+Requires FAISS. Builds a PQ model on the fly if not already present.
+
+```bash
+cd cuda_version && make run_pq
+```
+
+Or run the binary directly with additional parameters:
+
+**`--data_path_comp`**: Compressed data path.
+
+**`--index_path`**: Path to the HNSW index.
+
+**`--pq_model_out`**: Output path for the trained PQ model (.faiss).
+
+**`--pq_codes_out`**: Output path for PQ-encoded vectors (.bin).
+
+**`--M_compression_spaces`**: Number of PQ subspaces.
+
+**`--graph_M`**: Graph degree (must match index construction).
+
+```bash
+./cuda_version/build/gpu_pq --data_path_comp [path] --query_path [path] --index_path [path] --result_saveprefix [folder] --range_saveprefix [folder] --groundtruth_saveprefix [folder] --pq_model_out [path] --pq_codes_out [path] --M_compression_spaces [integer] --graph_M [integer]
+```
 
 ## Datasets
-| Dataset |Vector Type| Dimension | Attribute Type |
-|---------|-----------|-----------|----------------|
-|   [WIT](https://github.com/google-research-datasets/wit)   |   image   |   2048    |   image size   |
-|[TripClick](https://tripdatabase.github.io/tripclick/)|   text    |   768     |publication date|
-| [Redcaps](https://redcaps.xyz/) |multi-modality|  512   |   timestamp    |
-|[YouTube-RGB](https://research.google.com/youtube8m/download.html)|  video  |   1024    | \# of likes, \# of comments|
-|[YouTube-Audio](https://research.google.com/youtube8m/download.html)| audio |   128     | publish time,  \# of views | 
 
-
-
+| Dataset | Vector Type | Dimension | Attribute Type |
+|---------|-------------|-----------|----------------|
+| [GIST1M](http://corpus-texmex.irisa.fr/) | image descriptor | 960 | — |
+| [YouTube-Audio](https://research.google.com/youtube8m/download.html) | audio | 128 | publish time, number of views |
+| YouTube-Audio (Audi subset) | audio | 128 | number of likes |

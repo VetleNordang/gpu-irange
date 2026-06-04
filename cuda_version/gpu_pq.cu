@@ -17,6 +17,7 @@
 #include <curand_kernel.h>
 #include <cuda_profiler_api.h>
 #include "gpu_index.cuh"
+#include "gpu_pq_index.cuh"
 #include "gpu_heap.cuh"
 #include "gpu_visited.cuh"
 #include "gpu_search_updated.cuh"  // Contains irange_search_kernel (normal)
@@ -56,7 +57,7 @@ std::unique_ptr<faiss::ProductQuantizer> load_pq_model(const std::string& model_
     if (!pq) {
         throw std::runtime_error("Failed to load PQ model from " + model_path);
     }
-    printf("✓ PQ model loaded: d=%d, M=%d, nbits=%d, ksub=%d, dsub=%d, code_size=%d\n",
+    printf("✓ PQ model loaded: d=%zu, M=%zu, nbits=%zu, ksub=%zu, dsub=%zu, code_size=%zu\n",
            pq->d, pq->M, pq->nbits, pq->ksub, pq->dsub, pq->code_size);
     return pq;
 }
@@ -297,49 +298,47 @@ int* make_result_buffer_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, GP
 
 }
 
-void load_pq_model_to_gpu(GPUIndex &gpu_index, faiss::ProductQuantizer* pq_model) {
-    gpu_index.pq_dsub = pq_model->dsub;
-    gpu_index.pq_ksub = pq_model->ksub;
-    gpu_index.pq_M = pq_model->M;
-    gpu_index.pq_nbits = pq_model->nbits;
-    gpu_index.pq_code_size = pq_model->code_size;
-    gpu_index.use_pq = true;
+void load_pq_model_to_gpu(GPUPQIndex &gpu_index, faiss::ProductQuantizer* pq_model) {
+    gpu_index.pq.pq_dsub      = pq_model->dsub;
+    gpu_index.pq.pq_ksub      = pq_model->ksub;
+    gpu_index.pq.pq_M         = pq_model->M;
+    gpu_index.pq.pq_nbits     = pq_model->nbits;
+    gpu_index.pq.pq_code_size = pq_model->code_size;
 
     size_t centroids_size = (size_t)pq_model->M * pq_model->ksub * pq_model->dsub * sizeof(float);
     printf("PQ model (centroids): %.2f MB  (M=%zu, ksub=%zu, dsub=%zu)\n",
            centroids_size / (1024.0*1024), (size_t)pq_model->M, (size_t)pq_model->ksub, (size_t)pq_model->dsub);
-    cudaError_t err = cudaMalloc((void**)&gpu_index.d_centroids, centroids_size);
+    cudaError_t err = cudaMalloc((void**)&gpu_index.pq.d_centroids, centroids_size);
     if (err != cudaSuccess) {
         printf("CudaMalloc failed for PQ centroids: %s\n", cudaGetErrorString(err));
         return;
     }
 
-    err = cudaMemcpy(gpu_index.d_centroids, pq_model->centroids.data(), centroids_size, cudaMemcpyHostToDevice);
+    err = cudaMemcpy(gpu_index.pq.d_centroids, pq_model->centroids.data(), centroids_size, cudaMemcpyHostToDevice);
     if (err != cudaSuccess) {
         printf("CudaMemcpy failed for PQ centroids: %s\n", cudaGetErrorString(err));
-        cudaFree(gpu_index.d_centroids);
+        cudaFree(gpu_index.pq.d_centroids);
         return;
     }
-    
 }
 
-void load_pq_codes_to_gpu(GPUIndex &gpu_index, const std::vector<uint8_t>& pq_codes,
+void load_pq_codes_to_gpu(GPUPQIndex &gpu_index, const std::vector<uint8_t>& pq_codes,
                           int n_vectors, int M, int nbits, int code_size, int ksub, int dsub) {
-    gpu_index.pq_codes_cpu = pq_codes;
+    gpu_index.pq_codes_cpu   = pq_codes;
     gpu_index.gpu_codes_size = (size_t)pq_codes.size() * sizeof(uint8_t);
     printf("PQ codes: %.2f MB  (%d vectors x %d bytes/code)\n",
            gpu_index.gpu_codes_size / (1024.0*1024), n_vectors, code_size);
 
-    cudaError_t err = cudaMalloc((void**)&gpu_index.d_compressed_codes, gpu_index.gpu_codes_size);
+    cudaError_t err = cudaMalloc((void**)&gpu_index.pq.d_compressed_codes, gpu_index.gpu_codes_size);
     if (err != cudaSuccess) {
         printf("ERROR: cudaMalloc PQ codes: %s\n", cudaGetErrorString(err));
         return;
     }
 
-    err = cudaMemcpy(gpu_index.d_compressed_codes, pq_codes.data(), gpu_index.gpu_codes_size, cudaMemcpyHostToDevice);
+    err = cudaMemcpy(gpu_index.pq.d_compressed_codes, pq_codes.data(), gpu_index.gpu_codes_size, cudaMemcpyHostToDevice);
     if (err != cudaSuccess) {
         printf("ERROR: cudaMemcpy PQ codes: %s\n", cudaGetErrorString(err));
-        cudaFree(gpu_index.d_compressed_codes);
+        cudaFree(gpu_index.pq.d_compressed_codes);
         return;
     }
 }
@@ -386,16 +385,14 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
         }
     }
 
-    GPUIndex gpu_index;
+    GPUPQIndex gpu_index;
 
-
-
-    load_index_compact_to_gpu(index, gpu_index, paths["index"]);
+    load_index_compact_to_gpu(index, gpu_index.base, paths["index"]);
 
     // Load segment tree to GPU
-    load_segment_tree_to_gpu(index, gpu_index);
-    load_queries_to_gpu(index, gpu_index);
-    make_result_buffer_on_gpu(index, gpu_index);
+    load_segment_tree_to_gpu(index, gpu_index.base);
+    load_queries_to_gpu(index, gpu_index.base);
+    make_result_buffer_on_gpu(index, gpu_index.base);
 
     load_pq_model_to_gpu(gpu_index, pq_model);
     load_pq_codes_to_gpu(gpu_index, pq_blob.codes, pq_blob.n, pq_blob.M, pq_blob.nbits, pq_blob.code_size, pq_model->ksub, pq_model->dsub);
@@ -408,7 +405,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             int dim = index.storage->Dim;
             int n   = index.max_elements_;
             size_t links_bytes    = (size_t)n * index.size_links_per_element_;
-            size_t tree_bytes     = gpu_index.d_segment_tree.num_nodes * sizeof(GPUNode);
+            size_t tree_bytes     = gpu_index.base.d_segment_tree.num_nodes * sizeof(GPUNode);
             size_t pq_codes_bytes = gpu_index.gpu_codes_size;
             size_t centroids_bytes = (size_t)pq_model->M * pq_model->ksub * pq_model->dsub * sizeof(float);
             bf << "method=gpu_pq\n";
@@ -439,9 +436,9 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
     // Allocate ADC distance table buffer: one flat table per query.
     // Each table is pq_M * pq_ksub floats. Allocated once, reused across all ef values and suffixes.
     {
-        size_t table_floats = (size_t)gpu_index.pq_M * gpu_index.pq_ksub;
+        size_t table_floats = (size_t)gpu_index.pq.pq_M * gpu_index.pq.pq_ksub;
         size_t table_bytes  = (size_t)query_nb * table_floats * sizeof(float);
-        cudaError_t err = cudaMalloc(&gpu_index.d_dist_tables, table_bytes);
+        cudaError_t err = cudaMalloc(&gpu_index.pq.d_dist_tables, table_bytes);
         if (err != cudaSuccess) {
             printf("ERROR: Failed to allocate ADC distance tables: %s\n", cudaGetErrorString(err));
             return;
@@ -517,19 +514,21 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
                     return;
                 }
 
-                // Build a temporary GPUIndex view with per-query pointers offset to this batch.
+                // Build temporary per-batch views of the base index and PQ params.
                 // The kernel uses query_id in [0, batch_size) as a 0-based index into these arrays.
-                GPUIndex batch_gpu_index = gpu_index;
-                batch_gpu_index.d_query_vectors += (long long)batch_start * dim;
-                // d_query_range layout: query_nb * 22 ints (11 suffixes * 2 values)
-                batch_gpu_index.d_query_range   += (long long)batch_start * 22;
-                batch_gpu_index.d_results       += (long long)batch_start * query_K;
-                batch_gpu_index.d_dist_tables   += (long long)batch_start * gpu_index.pq_M * gpu_index.pq_ksub;
+                GPUIndex batch_base = gpu_index.base;
+                batch_base.d_query_vectors += (long long)batch_start * dim;
+                batch_base.d_query_range   += (long long)batch_start * (int)index.storage->query_range.size() * 2;
+                batch_base.d_results       += (long long)batch_start * query_K;
+
+                GPUPQParams batch_pq = gpu_index.pq;
+                batch_pq.d_dist_tables += (long long)batch_start * gpu_index.pq.pq_M * gpu_index.pq.pq_ksub;
 
                 int num_blocks = (batch_size + queries_per_block - 1) / queries_per_block;
 
                 irange_search_kernel_pq<<<num_blocks, threads_per_block>>>(
-                    batch_gpu_index, visited, batch_size, ef, query_K, dim, suffix_idx,
+                    batch_base, batch_pq, visited, batch_size, ef, query_K, dim, suffix_idx,
+                    (int)index.storage->query_range.size(),
                     d_hops + batch_start, d_dist_comps + batch_start,
                     index.size_links_per_layer_, kernel_seed,
                     d_heap_buf
@@ -566,7 +565,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
             int* cpu_hops       = new int[query_nb];
             int* cpu_dist_comps = new int[query_nb];
 
-            cudaMemcpy(cpu_results,    gpu_index.d_results, query_nb * query_K * sizeof(int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(cpu_results,    gpu_index.base.d_results, query_nb * query_K * sizeof(int), cudaMemcpyDeviceToHost);
             cudaMemcpy(cpu_hops,       d_hops,              query_nb * sizeof(int),            cudaMemcpyDeviceToHost);
             cudaMemcpy(cpu_dist_comps, d_dist_comps,        query_nb * sizeof(int),            cudaMemcpyDeviceToHost);
 
@@ -628,7 +627,7 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
         }
 
         // Write results to CSV file for this suffix
-        write_results_to_csv(saveprefix, suffix, current_suffix_results, gpu_index.pq_M, gpu_index.pq_nbits);
+        write_results_to_csv(saveprefix, suffix, current_suffix_results, gpu_index.pq.pq_M, gpu_index.pq.pq_nbits);
         printf("✓ Saved results for suffix %d to %s%d_gpu.csv\n", suffix, saveprefix.c_str(), suffix);
 
         suffix_idx++;  // Increment for next suffix
@@ -637,22 +636,9 @@ void search_on_gpu(iRangeGraph::iRangeGraph_Search<float> &index, std::vector<in
 
     cudaFree(d_hops);
     cudaFree(d_dist_comps);
-    
-    
-    // Free ADC distance table buffer
-    if (gpu_index.d_dist_tables) {
-        cudaFree(gpu_index.d_dist_tables);
-        gpu_index.d_dist_tables = nullptr;
-    }
 
-    if (gpu_index.d_data_memory) cudaFree(gpu_index.d_data_memory);
-    if (gpu_index.d_adjacency_lists) cudaFree(gpu_index.d_adjacency_lists);
-    if (gpu_index.d_segment_tree.d_nodes) cudaFree(gpu_index.d_segment_tree.d_nodes);
-    if (gpu_index.d_query_vectors) cudaFree(gpu_index.d_query_vectors);
-    if (gpu_index.d_query_range) cudaFree(gpu_index.d_query_range);
-    if (gpu_index.d_results) cudaFree(gpu_index.d_results);
-    if (gpu_index.d_compressed_codes) cudaFree(gpu_index.d_compressed_codes);
-    if (gpu_index.d_centroids) cudaFree(gpu_index.d_centroids);
+    gpu_index.free_pq();
+    gpu_index.base.free();
 }
 
 
