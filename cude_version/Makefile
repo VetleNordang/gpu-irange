@@ -9,14 +9,14 @@ PROJECT_ROOT = ..
 DIST_THREADS_PER_NEIGHBOR ?= 4
 OPT_FLAGS = -O3 --use_fast_math -lineinfo -DDIST_THREADS_PER_NEIGHBOR=$(DIST_THREADS_PER_NEIGHBOR) -Xcompiler "-O3 -fopenmp -DNDEBUG"
 BUILD_DIR = build
-TARGET = $(BUILD_DIR)/hello
+TARGET = $(BUILD_DIR)/gpu_full
 OPT_TARGET = $(BUILD_DIR)/optimized_test
-PQ_TARGET = $(BUILD_DIR)/hello_pq
-SOURCE = hello.cu
-PQ_SOURCE = hello_pq.cu
-ROOT_SOURCE = hello_root.cu
-ROOT_TARGET = $(BUILD_DIR)/hello_root
-HEADERS = gpu_search.cuh gpu_search_updated.cuh gpu_search_pq.cuh gpu_pq_distance.cuh gpu_index.cuh gpu_heap.cuh gpu_visited.cuh ../include/iRG_search.h ../include/utils.h
+PQ_TARGET = $(BUILD_DIR)/gpu_pq
+SOURCE = gpu_full.cu
+PQ_SOURCE = gpu_pq.cu
+ROOT_SOURCE = gpu_root.cu
+ROOT_TARGET = $(BUILD_DIR)/gpu_root
+HEADERS = gpu_search_updated.cuh gpu_search_pq.cuh gpu_pq_distance.cuh gpu_index.cuh gpu_heap.cuh gpu_visited.cuh ../include/iRG_search.h ../include/utils.h
 
 # FAISS support
 ENABLE_FAISS ?= 1
