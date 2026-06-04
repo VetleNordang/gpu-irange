@@ -82,7 +82,7 @@ METRIC_LABEL = {m["key"]: m["label"] for m in METRICS}
 METRIC_SCALE = {m["key"]: m["scale"] for m in METRICS}
 
 MODES = ["gpu_normal", "gpu_pq"]
-MODE_LABEL  = {"gpu_normal": "GPU-Exact", "gpu_pq": "GPU-PQ"}
+MODE_LABEL  = {"gpu_normal": "GPU-Full", "gpu_pq": "GPU-PQ"}
 MODE_COLOR  = {"gpu_normal": "tab:orange", "gpu_pq": "tab:green"}
 MODE_HATCH  = {"gpu_normal": "", "gpu_pq": "//"}
 
