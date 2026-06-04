@@ -52,8 +52,8 @@ DATASETS = [
 
 METHODS = [
     {"key": "cpu_parallel", "label": "CPU-P",      "color": "tab:blue"},
-    {"key": "gpu_normal",   "label": "GPU Normal", "color": "tab:orange"},
-    {"key": "gpu_pq",       "label": "GPU PQ",     "color": "tab:green"},
+    {"key": "gpu_normal",   "label": "GPU-Full",   "color": "tab:orange"},
+    {"key": "gpu_pq",       "label": "GPU-PQ",     "color": "tab:green"},
     {"key": "gpu_root",     "label": "GPU Root",   "color": "tab:purple"},
 ]
 

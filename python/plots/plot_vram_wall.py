@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plot actual VRAM usage (from CSV VRAM_MB column) for GPU Normal and GPU PQ
+Plot actual VRAM usage (from CSV VRAM_MB column) for GPU-Full and GPU-PQ
 across dataset sizes for Audi and Video, with a P100 limit line.
 
 Reads: executable_data/{family}/{size}/results/{method}/*.csv  (VRAM_MB column)
@@ -17,8 +17,10 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
-ROOT     = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = ROOT / "executable_data"
+ROOT          = Path(__file__).resolve().parent.parent.parent
+_DATA_P100    = ROOT / "executable_data"
+_DATA_IDUN    = ROOT / "temp_idun_results"
+DATA_DIR      = _DATA_P100
 
 P100_VRAM_MB = 12288  # Tesla P100-PCIE-12GB
 
@@ -38,7 +40,7 @@ FAMILIES = [
 ]
 
 METHODS = [
-    {"key": "gpu_normal", "csv_prefix": "gpu",  "label": "GPU-Exact", "color": "tab:orange"},
+    {"key": "gpu_normal", "csv_prefix": "gpu",  "label": "GPU-Full",  "color": "tab:orange"},
     {"key": "gpu_pq",     "csv_prefix": "pq",   "label": "GPU-PQ",    "color": "tab:blue"},
 ]
 
@@ -127,6 +129,16 @@ def plot_family(family: dict, out_path: Path) -> None:
 
 
 def main():
+    import argparse
+    p = argparse.ArgumentParser()
+    src = p.add_mutually_exclusive_group()
+    src.add_argument("--idun", action="store_true", help="Use temp_idun_results as data root.")
+    src.add_argument("--p100", action="store_true", help="Use executable_data as data root (default).")
+    args = p.parse_args()
+
+    global DATA_DIR
+    DATA_DIR = _DATA_IDUN if args.idun else _DATA_P100
+
     for family in FAMILIES:
         print(f"\n{family['name']}")
         out = DATA_DIR / family["key"] / "results" / "analysis" / "vram_wall.png"

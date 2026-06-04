@@ -25,7 +25,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent / "executable_data"
+_ROOT      = Path(__file__).resolve().parent.parent.parent
+_BASE_P100 = _ROOT / "executable_data"
+_BASE_IDUN = _ROOT / "temp_idun_results"
+BASE_DIR   = _BASE_P100
 
 FAMILIES = [
     {
@@ -61,8 +64,8 @@ FAMILIES = [
 ]
 
 METHODS = [
-    {"key": "gpu_normal", "label": "GPU Normal", "color": "tab:orange"},
-    {"key": "gpu_pq",     "label": "GPU PQ",     "color": "tab:green"},
+    {"key": "gpu_normal", "label": "GPU-Full",   "color": "tab:orange"},
+    {"key": "gpu_pq",     "label": "GPU-PQ",     "color": "tab:green"},
     {"key": "gpu_root",   "label": "GPU Root",   "color": "tab:purple"},
 ]
 
@@ -290,7 +293,13 @@ def main():
     p.add_argument("--env", default=None, help="Suffix for output filenames (e.g. 'idun').")
     p.add_argument("--hardware", default="", help="Hardware label for figure titles.")
     p.add_argument("--family", default=None, help="Family key to plot (audi, video, gist). Omit for all.")
+    src = p.add_mutually_exclusive_group()
+    src.add_argument("--idun", action="store_true", help="Use temp_idun_results as data root.")
+    src.add_argument("--p100", action="store_true", help="Use executable_data as data root (default).")
     args = p.parse_args()
+
+    global BASE_DIR
+    BASE_DIR = _BASE_IDUN if args.idun else _BASE_P100
 
     suffix = f"_{args.env}" if args.env else ""
 

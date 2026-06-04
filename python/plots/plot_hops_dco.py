@@ -46,8 +46,8 @@ DATASETS = [
 
 ALL_METHODS = [
     {"key": "cpu_parallel", "label": "CPU-P",      "color": "tab:blue"},
-    {"key": "gpu_normal",   "label": "GPU Normal", "color": "tab:orange"},
-    {"key": "gpu_pq",       "label": "GPU PQ",     "color": "tab:green"},
+    {"key": "gpu_normal",   "label": "GPU-Full",   "color": "tab:orange"},
+    {"key": "gpu_pq",       "label": "GPU-PQ",     "color": "tab:green"},
     {"key": "gpu_root",     "label": "GPU Root",   "color": "tab:purple"},
     {"key": "cpu_serial",   "label": "CPU-S",      "color": "tab:gray"},
 ]
@@ -80,11 +80,12 @@ def _run_aggregate_script(method_dir):
     return True
 
 
-def load_method(method_dir):
+def load_method(method_dir, run_aggregate=False):
     if not method_dir.is_dir():
         return None
 
-    _run_aggregate_script(method_dir)
+    if run_aggregate:
+        _run_aggregate_script(method_dir)
 
     agg_dir = method_dir / "aggregate"
     if agg_dir.is_dir():
@@ -185,6 +186,8 @@ def main():
                    help="Suffix for output filenames (e.g. 'idun').")
     p.add_argument("--hardware", default="",
                    help="Hardware label for figure titles.")
+    p.add_argument("--aggregate", action="store_true",
+                   help="Re-run aggregate_results.py for each method dir before plotting.")
     p.add_argument("--copy-to-thesis", action="store_true",
                    help="Copy output figures into thesis/Master/figs/results/{dataset}/.")
 
@@ -235,7 +238,7 @@ def main():
     for d in datasets:
         print(f"\n{d['name']}")
         results_dir = base_dir / d["path"] / "results"
-        data = {m["key"]: load_method(results_dir / m["key"]) for m in methods}
+        data = {m["key"]: load_method(results_dir / m["key"], run_aggregate=args.aggregate) for m in methods}
         if all(v is None for v in data.values()):
             print("  no data found — skipping")
             continue

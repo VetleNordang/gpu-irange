@@ -59,7 +59,7 @@ DATASETS = [
 METHODS = [
     {"key": "cpu_serial",   "label": "CPU-S",      "color": "tab:gray",   "default": False},
     {"key": "cpu_parallel", "label": "CPU-P",      "color": "tab:blue",   "default": True},
-    {"key": "gpu_normal",   "label": "GPU-Exact",  "color": "tab:orange", "default": True},
+    {"key": "gpu_normal",   "label": "GPU-Full",   "color": "tab:orange", "default": True},
     {"key": "gpu_pq",       "label": "GPU-PQ",     "color": "tab:green",  "default": True},
     {"key": "gpu_root",     "label": "GPU Root",   "color": "tab:purple", "default": False},
 ]
@@ -183,16 +183,17 @@ def _load_manual(method_dir):
     return raw.groupby(["range", "SearchEF"], as_index=False).agg(**agg_spec)
 
 
-def load_method(method_dir):
+def load_method(method_dir, run_aggregate=False):
     """Load aggregated results for one method directory.
 
-    Always re-runs aggregate_results.py to ensure fresh statistics.
-    Falls back to manual inline mean/min/max if the script fails.
+    Falls back to manual inline mean/min/max if aggregate dir is absent.
+    Pass run_aggregate=True to re-run aggregate_results.py first.
     """
     if not method_dir.is_dir():
         return None
 
-    _run_aggregate_script(method_dir)
+    if run_aggregate:
+        _run_aggregate_script(method_dir)
 
     df = _load_from_aggregate(method_dir)
     if df is not None:
@@ -201,10 +202,10 @@ def load_method(method_dir):
     return _load_manual(method_dir)
 
 
-def load_dataset(path, base_dir=None):
+def load_dataset(path, base_dir=None, run_aggregate=False):
     """Return {method_key: aggregated dataframe} for one dataset."""
     results = (base_dir or BASE_DIR) / path / "results"
-    return {m["key"]: load_method(results / m["key"]) for m in METHODS}
+    return {m["key"]: load_method(results / m["key"], run_aggregate=run_aggregate) for m in METHODS}
 
 
 # ── plotting ────────────────────────────────────────────────────────────────
@@ -311,7 +312,7 @@ def plot_speedup(name, data, out_path, title, hw_label="", ranges=None, numerato
     _save(fig, out_path)
 
 
-def plot_summary(datasets, methods, env_suffix, title, ef_target, rng, hw_label="", base_dir=None):
+def plot_summary(datasets, methods, env_suffix, title, ef_target, rng, hw_label="", base_dir=None, run_aggregate=False):
     """One QPS-vs-size figure per dataset family at a fixed ef and range."""
     families = {}
     for d in datasets:
@@ -320,7 +321,7 @@ def plot_summary(datasets, methods, env_suffix, title, ef_target, rng, hw_label=
         members = sorted(members, key=lambda d: d["size"])
         series = {m["key"]: ([], []) for m in methods}
         for d in members:
-            data = load_dataset(d["path"], base_dir=base_dir)
+            data = load_dataset(d["path"], base_dir=base_dir, run_aggregate=run_aggregate)
             for m in methods:
                 agg = data.get(m["key"])
                 if agg is None:
@@ -391,6 +392,8 @@ def main():
     p.add_argument("--speedup-numerator", default="gpu_normal",
                    help="Method key used as the speedup numerator (default: gpu_normal). "
                         "E.g. --speedup-numerator gpu_pq compares GPU-PQ vs CPU-P.")
+    p.add_argument("--aggregate", action="store_true",
+                   help="Re-run aggregate_results.py for each method dir before plotting.")
     p.add_argument("--copy-to-thesis", action="store_true",
                    help="Copy output figures into thesis/Master/figs/results/{dataset}/.")
 
@@ -454,7 +457,7 @@ def main():
 
     for d in datasets:
         print(f"{d['name']}")
-        data = load_dataset(d["path"], base_dir=base_dir)
+        data = load_dataset(d["path"], base_dir=base_dir, run_aggregate=args.aggregate)
         if all(v is None for v in data.values()):
             print("  no data found")
             continue
@@ -482,7 +485,8 @@ def main():
     if args.summary:
         print("Scale summary")
         plot_summary(datasets, methods, suffix, args.title,
-                     args.summary_ef, args.summary_range, args.hardware, base_dir=base_dir)
+                     args.summary_ef, args.summary_range, args.hardware, base_dir=base_dir,
+                     run_aggregate=args.aggregate)
 
 
 if __name__ == "__main__":

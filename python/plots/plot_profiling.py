@@ -319,7 +319,7 @@ def main():
 
     platforms = []
     if args.idun:
-        platforms.append({"base": BASE_IDUN, "label": "H200", "tag": "h200"})
+        platforms.append({"base": BASE_IDUN, "label": "H100", "tag": "h100"})
     if args.p100:
         platforms.append({"base": BASE_P100, "label": "P100", "tag": "p100"})
 
